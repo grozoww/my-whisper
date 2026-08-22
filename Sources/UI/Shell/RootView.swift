@@ -17,35 +17,48 @@ struct RootView: View {
                 .toolbar(removing: .title)
                 .toolbar { inputDeviceToolbar }
         }
-        .frame(minWidth: 780, minHeight: 560)
+        // Wide enough for the widest screen: the sidebar, the mode list beside it, and an editor
+        // with room for a label and its control on one line. At the old 780 the mode editor was
+        // squeezed until its labels broke one letter per line.
+        .frame(minWidth: 880, minHeight: 560)
         .tint(appState.settings.settings.appearance.accent.color)
         .onDisappear { WindowPresenter.resignIfNoWindows() }
     }
 
-    /// The input device sits on the trailing edge, as plain text.
+    /// Which microphone dictation will record from, on the trailing edge of every screen.
     ///
-    /// Two wrinkles. Without a title there is nothing pushing the item right, so it needs an
-    /// explicit spacer. And on macOS 26 every toolbar item gets a glass background by default,
-    /// which reads as a button here — `sharedBackgroundVisibility(.hidden)` turns that off.
+    /// Three wrinkles. Without a title there is nothing pushing the item right, so it needs an
+    /// explicit spacer. On macOS 26 every toolbar item gets a glass background by default, which
+    /// reads as a button here — `sharedBackgroundVisibility(.hidden)` turns that off. And a name
+    /// sitting in a corner explains nothing on its own, so it is a button to the screen that
+    /// changes it, with the sentence in its tooltip.
     @ToolbarContentBuilder
     private var inputDeviceToolbar: some ToolbarContent {
         if #available(macOS 26.0, *) {
             ToolbarSpacer(.flexible)
-            ToolbarItem(placement: .primaryAction) { inputDeviceLabel }
+            ToolbarItem(placement: .primaryAction) { inputDeviceButton }
                 .sharedBackgroundVisibility(.hidden)
         } else {
             ToolbarItem(placement: .principal) { Spacer() }
-            ToolbarItem(placement: .primaryAction) { inputDeviceLabel }
+            ToolbarItem(placement: .primaryAction) { inputDeviceButton }
         }
     }
 
-    private var inputDeviceLabel: some View {
-        HStack(spacing: 6) {
-            Text(appState.inputDeviceName)
-            Image(systemName: "laptopcomputer")
+    private var inputDeviceButton: some View {
+        Button {
+            appState.selectedSection = .sound
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "mic.fill")
+                Text(appState.inputDeviceName)
+                    .lineLimit(1)
+            }
+            .font(.system(size: 13))
+            .foregroundStyle(.secondary)
         }
-        .font(.system(size: 13))
-        .foregroundStyle(.secondary)
+        .buttonStyle(.plain)
+        .pointerStyle(.link)
+        .help("Dictation records from this microphone. Click to change it in Sound.")
     }
 
     @ViewBuilder

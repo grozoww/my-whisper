@@ -62,7 +62,9 @@ values (`home`, `modes`, `vocabulary`, `configuration`, `sound`, `modelsLibrary`
 `screenshots.sh` is the third of these. It launches the app with `OURWHISPER_SCREENSHOT=<target>`,
 which seeds demo data, poses one screen and prints its window number for `screencapture` — see
 `ScreenshotMode`. **If you are an agent and want to see what a screen looks like**, this is the
-command, and it is cheaper than the throwaway harness.
+command, and it is cheaper than the throwaway harness. `OURWHISPER_SCREENSHOT_SIZE=880x560` and
+`OURWHISPER_SCREENSHOT_SIDEBAR=collapsed` pose the awkward cases — the window at its minimum, and
+the screens whose own list becomes the leftmost thing in the window.
 
 ## Layout
 
@@ -148,6 +150,22 @@ second `OurWhisper.app` in a different DerivedData directory, and a permission g
 not apply to the other — while System Settings still shows a ticked OurWhisper. This presents as
 "I granted it and the app still says I did not". The Home screen shows the running bundle path and
 warns when other builds exist; check that before suspecting the permission code.
+
+**Padding a `Section` pads every row in it.** In a `List`, `Section { rows }.padding(.top, 10)`
+does not put 10pt above the group — it puts 10pt above each row inside it, so the rows come out
+taller than the rows in the group above and their selection highlights come out taller with them.
+The sidebar shipped that way. The gap between groups is the section break itself; there is nothing
+to add.
+
+**A pane whose content cannot shrink is laid out past the window edge, and then clipped.** Two
+shapes of this. `HSplitView` sizes each pane to its content's ideal width, so a detail pane with a
+wide row overflows the window with no scroll bar and no reflow — `ModesView` and `HistoryView` both
+use a plain `HStack` with an explicit list width for that reason. And a row whose text column has
+no minimum width loses the negotiation entirely: `SettingsRow` used to let its label shrink to
+nothing, which turned "Symbol" into one letter per line in a narrow mode editor. It now measures
+with `ViewThatFits` and drops the control onto its own line instead. The window's `minWidth` is the
+other half of that: it is set to what the widest screen actually needs, and lowering it puts the
+squeeze back.
 
 **A window sized to its content view does not resize when the content does.** The pill's phases
 are different widths — "Cleaning up" is wider than five audio bars — so setting `PillModel.phase`

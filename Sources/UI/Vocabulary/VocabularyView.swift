@@ -89,7 +89,10 @@ struct VocabularyView: View {
                 .foregroundStyle(.secondary)
         }
         .buttonStyle(.borderless)
-        .padding(8)
+        // Same clearance as the mode list's footer: tight against the window's rounded corner,
+        // the buttons look like they are falling out of it.
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     /// Writes each edit straight back to the store. Vocabulary rows are one short field each, so

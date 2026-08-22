@@ -41,7 +41,7 @@ jobs:
       # Full history, not the single commit `actions/checkout` clones by default. scripts/version.sh
       # derives the patch number from the pull requests merged since the version line was set, and
       # a shallow clone has no merges in it to count — every build would come out as x.y.0.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -142,7 +142,7 @@ jobs:
         run: gh release delete "$ROLLING_TAG" --yes --cleanup-tag || true
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # SHA256SUMS is what scripts/install.sh checks the download against.
           files: |

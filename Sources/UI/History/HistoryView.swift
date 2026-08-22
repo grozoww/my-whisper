@@ -23,9 +23,15 @@ struct HistoryView: View {
                 )
                 .frame(maxHeight: .infinity)
             } else {
-                HSplitView {
-                    list.frame(minWidth: 260, idealWidth: 320, maxWidth: 420)
-                    detail.frame(minWidth: 320, maxWidth: .infinity, maxHeight: .infinity)
+                // A plain HStack with an explicit width, not an HSplitView — the same trap the
+                // mode list documents. HSplitView sizes each pane to its content's ideal width,
+                // and the transcript detail's ideal width is wider than a narrow window, so the
+                // right-hand column was laid out past the window edge and simply cut off: no
+                // scroll bar, no reflow, a "Copy" button half off the screen.
+                HStack(spacing: 0) {
+                    list.frame(width: 300)
+                    Divider()
+                    detail.frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
 

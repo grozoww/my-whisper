@@ -1,5 +1,11 @@
 import SwiftUI
 
+/// How much room a `SettingsRow` label needs before its control is allowed to sit beside it.
+/// Under this, the row stacks instead. The layout before this had no floor under the text column,
+/// and in a narrow pane — the mode editor at the window's minimum width — "Symbol" came out as one
+/// letter per line.
+private let settingsRowLabelWidth: CGFloat = 150
+
 /// The standard row inside a `Card`: icon, title, explanation, control on the right.
 ///
 /// Every settings screen is built from this. Not for tidiness — for honesty. The layout forces
@@ -13,32 +19,68 @@ struct SettingsRow<Control: View>: View {
     @ViewBuilder var control: Control
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            Image(systemName: symbol)
-                .font(.system(size: 16))
-                .foregroundStyle(tint)
-                .frame(width: 24, alignment: .center)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 14, weight: .medium))
-                if let detail {
-                    Text(detail)
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            // The text column yields first. Without this the label's ideal width wins the
-            // negotiation and the control on the right is pushed past the edge of the pane.
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .layoutPriority(-1)
-
-            control
-                .labelsHidden()
-                .controlSize(.regular)
-                .fixedSize(horizontal: true, vertical: false)
+        // `ViewThatFits` measures the first layout at its ideal width, which the frame below
+        // pins to icon + label + control. When the pane is narrower than that, the second layout
+        // wins and the control moves to a line of its own.
+        ViewThatFits(in: .horizontal) {
+            sideBySide
+            stacked
         }
         .padding(14)
+    }
+
+    private var sideBySide: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            icon
+            label
+                .frame(
+                    minWidth: settingsRowLabelWidth,
+                    idealWidth: settingsRowLabelWidth,
+                    maxWidth: .infinity,
+                    alignment: .leading
+                )
+            sizedControl
+        }
+    }
+
+    private var stacked: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                icon
+                label
+                Spacer(minLength: 0)
+            }
+            // Indented to the text column, so the control reads as belonging to the row above it
+            // rather than starting a new one.
+            sizedControl
+                .padding(.leading, 36)
+        }
+    }
+
+    private var icon: some View {
+        Image(systemName: symbol)
+            .font(.system(size: 16))
+            .foregroundStyle(tint)
+            .frame(width: 24, alignment: .center)
+    }
+
+    private var label: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.system(size: 14, weight: .medium))
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var sizedControl: some View {
+        control
+            .labelsHidden()
+            .controlSize(.regular)
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
