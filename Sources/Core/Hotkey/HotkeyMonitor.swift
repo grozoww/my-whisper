@@ -30,7 +30,9 @@ final class HotkeyMonitor {
     private var tap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
 
-    private var toggleChord: HotkeyChord = .hyper
+    /// Both are optional: in push-to-talk mode nothing is bound to toggle, and binding a chord
+    /// that cannot be pressed would be a sentinel value waiting to be matched by accident.
+    private var toggleChord: HotkeyChord?
     private var pushToTalkChord: HotkeyChord?
 
     /// Whether the modifier-only chord was already fully held on the previous event. Without this
@@ -42,7 +44,7 @@ final class HotkeyMonitor {
 
     // MARK: - Lifecycle
 
-    func configure(toggle: HotkeyChord, pushToTalk: HotkeyChord?) {
+    func configure(toggle: HotkeyChord?, pushToTalk: HotkeyChord?) {
         toggleChord = toggle
         pushToTalkChord = pushToTalk
     }
@@ -162,7 +164,7 @@ final class HotkeyMonitor {
             }
         }
 
-        if toggleChord.isModifierOnly {
+        if let toggleChord, toggleChord.isModifierOnly {
             let satisfied = toggleChord.isSatisfied(by: flags)
             // Rising edge only. A modifier chord emits one flagsChanged per key, so holding
             // ⌥⌘⌃⇧ produces four events and only the last one completes the chord.
@@ -187,7 +189,8 @@ final class HotkeyMonitor {
             return .consume // so Escape does not also dismiss something in the focused app
         }
 
-        if let code = toggleChord.keyCode, code == keyCode, toggleChord.isSatisfied(by: flags) {
+        if let toggleChord, let code = toggleChord.keyCode, code == keyCode,
+           toggleChord.isSatisfied(by: flags) {
             onEvent?(.toggle)
             return .consume
         }

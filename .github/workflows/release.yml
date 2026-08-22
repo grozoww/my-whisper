@@ -5,27 +5,52 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # Lets you produce a downloadable build before you have an Apple Developer account, and lets you
+  # rehearse the whole thing without cutting a tag.
+  workflow_dispatch:
+    inputs:
+      unsigned:
+        description: 'Build without signing or notarizing (no Apple Developer account needed)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
 jobs:
   release:
-    name: Sign, notarize, publish
+    name: Package and publish
     runs-on: macos-latest
-    if: github.repository == 'grozoww/our-whisper'
+    if: github.repository == 'grozoww/my-whisper'
 
     steps:
       - uses: actions/checkout@v4
 
-      # Required repository secrets:
+      # Secrets are not available in a job-level `if:`, so which path to take is worked out here
+      # and read from `env` by the steps below.
+      #
+      # Required repository secrets for the notarized path:
       #   MACOS_CERTIFICATE          base64 of the Developer ID Application .p12
       #   MACOS_CERTIFICATE_PASSWORD password for that .p12
       #   MACOS_SIGNING_IDENTITY     e.g. "Developer ID Application: Name (TEAMID)"
       #   APPLE_TEAM_ID              10-character team id
       #   NOTARY_APPLE_ID            Apple ID used for notarization
       #   NOTARY_PASSWORD            app-specific password for that Apple ID
+      - name: Decide signing path
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+          FORCED_UNSIGNED: ${{ inputs.unsigned }}
+        run: |
+          if [ "$FORCED_UNSIGNED" = "true" ] || [ -z "$MACOS_CERTIFICATE" ] || [ -z "$NOTARY_PASSWORD" ]; then
+            echo "SIGNED=false" >> "$GITHUB_ENV"
+            echo "Building unsigned — downloads will need right-click → Open on first launch."
+          else
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Import signing certificate
+        if: env.SIGNED == 'true'
         env:
           MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
           MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
@@ -43,6 +68,7 @@ jobs:
           rm -f /tmp/cert.p12
 
       - name: Build, sign, notarize, staple
+        if: env.SIGNED == 'true'
         env:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -50,12 +76,31 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: ./scripts/package.sh
 
+      - name: Build unsigned
+        if: env.SIGNED == 'false'
+        run: ./scripts/package.sh --unsigned
+
+      # An unsigned download that refuses to open, with no explanation, reads as broken software.
+      # package.sh writes the wording; this puts it where the person downloading will see it.
+      - name: Assemble release notes
+        run: |
+          if [ -f dist/INSTALL.md ]; then
+            cat dist/INSTALL.md > release-notes.md
+            printf '\n---\n\n' >> release-notes.md
+          else
+            : > release-notes.md
+          fi
+
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.dmg
+          body_path: release-notes.md
           generate_release_notes: true
+          # workflow_dispatch has no tag of its own; naming one keeps repeat runs from colliding.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
+          prerelease: ${{ env.SIGNED == 'false' }}
 
       - name: Clean up keychain
-        if: always()
+        if: always() && env.SIGNED == 'true'
         run: security delete-keychain build.keychain || true

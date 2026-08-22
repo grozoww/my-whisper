@@ -9,11 +9,15 @@ struct SidebarView: View {
                 ForEach(Array(NavigationSection.groups.enumerated()), id: \.offset) { index, group in
                     Section {
                         ForEach(group) { section in
-                            Label {
+                            // An explicit HStack rather than `Label`. In a sidebar list, `Label`
+                            // puts its icon in the list's icon gutter, and macOS 26's floating
+                            // sidebar clips that gutter — the tinted squares end up sliced off
+                            // against the window edge.
+                            HStack(spacing: 8) {
+                                SectionIcon(symbol: section.symbol, tint: section.tint)
                                 Text(section.title)
                                     .font(.system(size: 14))
-                            } icon: {
-                                SectionIcon(symbol: section.symbol, tint: section.tint)
+                                Spacer(minLength: 0)
                             }
                             .padding(.vertical, 2)
                             .tag(section)
@@ -46,7 +50,7 @@ private struct SidebarFooter: View {
                 .font(.system(size: 11))
                 .foregroundStyle(.tertiary)
 
-            Link(destination: URL(string: "https://github.com/grozoww/our-whisper")!) {
+            Link(destination: URL(string: "https://github.com/grozoww/my-whisper")!) {
                 Text("OurWhisper")
                     .font(.system(size: 13, weight: .medium))
                     .frame(maxWidth: .infinity)

@@ -1,5 +1,7 @@
 import AVFoundation
 import Accelerate
+import CoreAudio
+import OSLog
 
 /// Microphone capture, converted to what the speech models want: 16 kHz, mono, 32-bit float.
 ///
@@ -30,6 +32,7 @@ final class AudioCapture: @unchecked Sendable {
 
     private let engine = AVAudioEngine()
     private let lock = NSLock()
+    private let log = Logger(subsystem: "com.grozoww.ourwhisper", category: "audio")
 
     /// Accumulated 16 kHz mono samples for the current utterance.
     private var samples: [Float] = []
@@ -42,10 +45,17 @@ final class AudioCapture: @unchecked Sendable {
 
     // MARK: - Control
 
-    func start() throws {
+    /// Starts capture.
+    ///
+    /// - Parameter deviceUID: CoreAudio UID of the microphone to record from, or `nil` to follow
+    ///   the system default. An unknown UID — the device was unplugged since it was chosen — also
+    ///   falls back to the default rather than failing: the user pressed the hotkey to talk, and
+    ///   refusing to record because their preferred mic is in another bag helps nobody.
+    func start(deviceUID: String? = nil) throws {
         guard !isRunning else { return }
 
         let input = engine.inputNode
+        selectInputDevice(uid: deviceUID, on: input)
         let inputFormat = input.outputFormat(forBus: 0)
         guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
             throw CaptureError.noInputDevice
@@ -115,6 +125,33 @@ final class AudioCapture: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return Double(samples.count) / Self.targetSampleRate
+    }
+
+    // MARK: - Device selection
+
+    /// Points the engine's input unit at a specific device.
+    ///
+    /// Must happen before `outputFormat(forBus:)` is read: switching the device changes the
+    /// hardware sample rate, and a converter built for the previous device would resample from the
+    /// wrong rate — which sounds like a chipmunk, not like an error.
+    private func selectInputDevice(uid: String?, on input: AVAudioInputNode) {
+        guard let uid, let audioUnit = input.audioUnit else { return }
+        guard var deviceID = AudioDevices.deviceID(forUID: uid) else {
+            log.info("Preferred input device is not connected; using the system default")
+            return
+        }
+
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        if status != noErr {
+            log.error("Could not select input device \(uid, privacy: .public): OSStatus \(status)")
+        }
     }
 
     // MARK: - Audio thread

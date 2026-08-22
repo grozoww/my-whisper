@@ -13,12 +13,18 @@
 /* Begin PBXFileReference section */
 		AA0000000000000000000005 /* OurWhisper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OurWhisper.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		AA0000000000000000000010 /* OurWhisper.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OurWhisper.entitlements; sourceTree = "<group>"; };
+		AA0000000000000000000041 /* OurWhisperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OurWhisperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		AA000000000000000000000F /* Sources */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Sources;
+			sourceTree = "<group>";
+		};
+		AA0000000000000000000040 /* Tests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Tests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +38,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000043 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -39,6 +52,7 @@
 			isa = PBXGroup;
 			children = (
 				AA000000000000000000000F /* Sources */,
+				AA0000000000000000000040 /* Tests */,
 				AA0000000000000000000010 /* OurWhisper.entitlements */,
 				AA0000000000000000000003 /* Products */,
 			);
@@ -48,6 +62,7 @@
 			isa = PBXGroup;
 			children = (
 				AA0000000000000000000005 /* OurWhisper.app */,
+				AA0000000000000000000041 /* OurWhisperTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -78,6 +93,28 @@
 			productReference = AA0000000000000000000005 /* OurWhisper.app */;
 			productType = "com.apple.product-type.application";
 		};
+		AA0000000000000000000042 /* OurWhisperTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA0000000000000000000047 /* Build configuration list for PBXNativeTarget "OurWhisperTests" */;
+			buildPhases = (
+				AA0000000000000000000044 /* Sources */,
+				AA0000000000000000000043 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AA0000000000000000000046 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AA0000000000000000000040 /* Tests */,
+			);
+			name = OurWhisperTests;
+			packageProductDependencies = (
+			);
+			productName = OurWhisperTests;
+			productReference = AA0000000000000000000041 /* OurWhisperTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -90,6 +127,10 @@
 				TargetAttributes = {
 					AA0000000000000000000004 = {
 						CreatedOnToolsVersion = 26.5;
+					};
+					AA0000000000000000000042 = {
+						CreatedOnToolsVersion = 26.5;
+						TestTargetID = AA0000000000000000000004;
 					};
 				};
 			};
@@ -111,6 +152,7 @@
 			projectRoot = "";
 			targets = (
 				AA0000000000000000000004 /* OurWhisper */,
+				AA0000000000000000000042 /* OurWhisperTests */,
 			);
 		};
 /* End PBXProject section */
@@ -133,13 +175,42 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AA0000000000000000000044 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		AA0000000000000000000046 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AA0000000000000000000004 /* OurWhisper */;
+			targetProxy = AA0000000000000000000045 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		AA0000000000000000000045 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = AA0000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AA0000000000000000000004;
+			remoteInfo = OurWhisper;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		AA000000000000000000000B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				// Apple Silicon only, and not incidentally: Parakeet runs on the Neural Engine and
+				// FluidAudio refuses to load on Intel. Without this, a Release build tries to
+				// produce a universal binary and fails compiling a dependency for x86_64.
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -171,6 +242,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				// Apple Silicon only, and not incidentally: Parakeet runs on the Neural Engine and
+				// FluidAudio refuses to load on Intel. Without this, a Release build tries to
+				// produce a universal binary and fails compiling a dependency for x86_64.
+				ARCHS = arm64;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
 				CLANG_ENABLE_MODULES = YES;
 				CLANG_ENABLE_OBJC_ARC = YES;
@@ -203,7 +278,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OurWhisper;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "MIT licensed. github.com/grozoww/our-whisper";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "MIT licensed. github.com/grozoww/my-whisper";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OurWhisper listens to your microphone only while you hold the dictation hotkey, and transcribes it on this Mac.";
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.grozoww.ourwhisper;
@@ -226,13 +301,43 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OurWhisper;
 				INFOPLIST_KEY_LSUIElement = YES;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "MIT licensed. github.com/grozoww/our-whisper";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "MIT licensed. github.com/grozoww/my-whisper";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "OurWhisper listens to your microphone only while you hold the dictation hotkey, and transcribes it on this Mac.";
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.grozoww.ourwhisper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		AA0000000000000000000048 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.grozoww.ourwhisper.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OurWhisper.app/Contents/MacOS/OurWhisper";
+			};
+			name = Debug;
+		};
+		AA0000000000000000000049 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.grozoww.ourwhisper.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OurWhisper.app/Contents/MacOS/OurWhisper";
 			};
 			name = Release;
 		};
@@ -253,6 +358,15 @@
 			buildConfigurations = (
 				AA000000000000000000000D /* Debug */,
 				AA000000000000000000000E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AA0000000000000000000047 /* Build configuration list for PBXNativeTarget "OurWhisperTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AA0000000000000000000048 /* Debug */,
+				AA0000000000000000000049 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

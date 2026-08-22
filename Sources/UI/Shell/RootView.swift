@@ -18,6 +18,7 @@ struct RootView: View {
                 .toolbar { inputDeviceToolbar }
         }
         .frame(minWidth: 780, minHeight: 560)
+        .tint(appState.settings.settings.appearance.accent.color)
         .onDisappear { WindowPresenter.resignIfNoWindows() }
     }
 
@@ -50,27 +51,13 @@ struct RootView: View {
     @ViewBuilder
     private var detail: some View {
         switch appState.selectedSection {
-        case .home:
-            HomeView()
-        default:
-            ComingSoonView(section: appState.selectedSection)
+        case .home: HomeView()
+        case .modes: ModesView()
+        case .vocabulary: VocabularyView()
+        case .configuration: ConfigurationView()
+        case .sound: SoundView()
+        case .modelsLibrary: ModelsLibraryView()
+        case .history: HistoryView()
         }
-    }
-}
-
-/// Honest placeholder. An empty pane reads as a bug; naming the phase reads as a roadmap.
-struct ComingSoonView: View {
-    let section: NavigationSection
-
-    var body: some View {
-        VStack(spacing: 12) {
-            SectionIcon(symbol: section.symbol, tint: section.tint, size: 48)
-            Text(section.title)
-                .font(.title2.weight(.semibold))
-            Text("Arrives in \(section.deliveredIn).")
-                .font(.system(size: 13))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

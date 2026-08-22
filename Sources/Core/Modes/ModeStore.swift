@@ -1,0 +1,80 @@
+import Foundation
+import Observation
+
+/// Holds the mode list and decides which one applies right now.
+@MainActor
+@Observable
+final class ModeStore {
+    private(set) var modes: [Mode] = []
+
+    @ObservationIgnored private let file: JSONFileStore<[Mode]>
+
+    init(directory: URL = AppDirectories.support) {
+        file = JSONFileStore(fileName: "modes.json", directory: directory)
+        modes = file.load() ?? Mode.builtIns
+        // A file written by an older build can be missing a mode added since. Re-adding by id
+        // keeps the user's edits to the modes they already have.
+        let known = Set(modes.map(\.id))
+        let missing = Mode.builtIns.filter { !known.contains($0.id) }
+        if !missing.isEmpty {
+            modes.append(contentsOf: missing)
+            save()
+        }
+    }
+
+    // MARK: - Selection
+
+    /// The mode to use for one dictation.
+    ///
+    /// App matching wins over the saved selection when auto-switch is on — that is the entire
+    /// point of it. Everything falls back to the first mode rather than to nothing, because a
+    /// dictation must never fail for want of a mode.
+    func resolve(settings: RefinementSettings, frontmostBundleID: String?) -> Mode {
+        if settings.autoSwitchByApp, let match = modes.first(where: { $0.claims(bundleID: frontmostBundleID) }) {
+            return match
+        }
+        if let id = settings.activeModeID, let chosen = modes.first(where: { $0.id == id }) {
+            return chosen
+        }
+        return modes.first ?? Mode.builtIns[0]
+    }
+
+    // MARK: - Editing
+
+    func update(_ mode: Mode) {
+        guard let index = modes.firstIndex(where: { $0.id == mode.id }) else { return }
+        modes[index] = mode
+        save()
+    }
+
+    @discardableResult
+    func add(name: String = "New mode") -> Mode {
+        let mode = Mode(
+            name: name,
+            symbol: "sparkles",
+            instructions: Mode.builtIns[0].instructions
+        )
+        modes.append(mode)
+        save()
+        return mode
+    }
+
+    /// Built-in modes cannot be deleted; they can be edited, and reset back to what shipped.
+    func delete(_ id: UUID) {
+        guard let index = modes.firstIndex(where: { $0.id == id }), !modes[index].isBuiltIn else { return }
+        modes.remove(at: index)
+        save()
+    }
+
+    func resetToShipped(_ id: UUID) {
+        guard let shipped = Mode.builtIns.first(where: { $0.id == id }),
+              let index = modes.firstIndex(where: { $0.id == id })
+        else { return }
+        modes[index] = shipped
+        save()
+    }
+
+    func flush() { file.flush() }
+
+    private func save() { file.save(modes) }
+}

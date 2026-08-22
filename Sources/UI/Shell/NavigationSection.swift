@@ -45,15 +45,13 @@ enum NavigationSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Which build phase delivers this screen. Drives the placeholder copy so the app is honest
-    /// about what is not built yet instead of showing an empty pane.
-    var deliveredIn: String {
-        switch self {
-        case .home: "P0"
-        case .modelsLibrary: "P2"
-        case .modes, .vocabulary: "P3"
-        case .configuration, .sound, .history: "P4"
-        }
+    /// Opens the app on a given screen: `OURWHISPER_SECTION=modes open -a OurWhisper`.
+    ///
+    /// The window is only reachable by clicking a menu bar icon, which makes every screen but Home
+    /// awkward to inspect from a script or a debugger — and impossible for anything automated.
+    /// Same reasoning as `OURWHISPER_SELFTEST`.
+    static var requested: NavigationSection? {
+        ProcessInfo.processInfo.environment["OURWHISPER_SECTION"].flatMap(NavigationSection.init(rawValue:))
     }
 
     /// Sidebar groups, separated by spacing in the list.

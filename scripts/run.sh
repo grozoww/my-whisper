@@ -5,6 +5,8 @@
 #
 #   ./scripts/run.sh              build Debug and relaunch
 #   ./scripts/run.sh --build      build only
+#   ./scripts/run.sh --test       run the unit tests
+#   ./scripts/run.sh --check      what CI runs: warning-free build, tests, dependency audit
 #   ./scripts/run.sh --logs       tail the app's logs (also works while it runs)
 #   ./scripts/run.sh --selftest speech.wav [ru]
 #                                 transcribe a file and print the result, no UI needed
@@ -51,9 +53,50 @@ stop() {
   pkill -f "$SCHEME.app/Contents/MacOS/$SCHEME" 2>/dev/null || true
 }
 
+# The test target uses the app as its test host, so launching it must not start a 600 MB model
+# download — see `AppState.isRunningTests`.
+run_tests() {
+  echo "==> Testing $SCHEME"
+  set -o pipefail
+  xcodebuild \
+    -project "$SCHEME.xcodeproj" \
+    -scheme "$SCHEME" \
+    -configuration "$CONFIG" \
+    -destination 'platform=macOS' \
+    test 2>&1 \
+    | grep -vE 'linkd\.autoShortcut|Process Instance Registry' \
+    | grep -E '(error|warning):|✘|✔ Test run|TEST (SUCCEEDED|FAILED)' || true
+}
+
 case "${1:-}" in
   --build)
     build
+    ;;
+
+  --test)
+    run_tests
+    ;;
+
+  --check)
+    # The same gates as .github/workflows/ci.yml, so a failure shows up here rather than after a
+    # push. CONTRIBUTING.md makes the warning-free build a rule; this is where it is enforced.
+    echo "==> Building (warnings are errors here)"
+    set -o pipefail
+    xcodebuild \
+      -project "$SCHEME.xcodeproj" \
+      -scheme "$SCHEME" \
+      -configuration "$CONFIG" \
+      -destination 'platform=macOS' \
+      clean build 2>&1 | tee /tmp/ourwhisper-build.log \
+      | grep -E '(error|warning):|BUILD (SUCCEEDED|FAILED)' || true
+
+    if grep -qE '^/.*warning:' /tmp/ourwhisper-build.log; then
+      echo "Build produced warnings. See CONTRIBUTING.md — keep the build warning-free."
+      exit 1
+    fi
+
+    run_tests
+    ./scripts/audit-deps.sh
     ;;
 
   --logs)

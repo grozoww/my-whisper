@@ -32,7 +32,37 @@ final class PermissionsManager {
 
     func refresh() {
         microphone = Self.microphoneStatus()
-        accessibility = AXIsProcessTrusted() ? .granted : .denied
+        // `AXIsProcessTrustedWithOptions(nil)` rather than `AXIsProcessTrusted()`: the latter is
+        // documented to cache within a process on some releases, which is exactly the "I granted
+        // it and the app still says I did not" report this poll exists to prevent.
+        accessibility = AXIsProcessTrustedWithOptions(nil) ? .granted : .denied
+    }
+
+    /// The bundle macOS is actually deciding about.
+    ///
+    /// Accessibility is granted per app *bundle*, and a debug build lives inside DerivedData at a
+    /// path that changes with the checkout — so a second clone or a git worktree produces a second
+    /// OurWhisper.app that has been granted nothing, while System Settings still shows a ticked
+    /// OurWhisper. Showing this path is the difference between a five-minute fix and an hour.
+    nonisolated var runningBundleURL: URL { Bundle.main.bundleURL }
+
+    /// True when another OurWhisper.app exists elsewhere in DerivedData — the usual cause of a
+    /// permission that looks granted but is not.
+    nonisolated var hasOtherBuilds: Bool {
+        let derived = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Developer/Xcode/DerivedData")
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: derived, includingPropertiesForKeys: nil
+        ) else { return false }
+
+        let mine = runningBundleURL.standardizedFileURL
+        return contents
+            .filter { $0.lastPathComponent.hasPrefix("OurWhisper-") }
+            .contains { candidate in
+                let app = candidate.appendingPathComponent("Build/Products/Debug/OurWhisper.app")
+                return FileManager.default.fileExists(atPath: app.path)
+                    && app.standardizedFileURL != mine
+            }
     }
 
     private static func microphoneStatus() -> Status {
