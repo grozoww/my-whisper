@@ -75,6 +75,10 @@ final class TextInjector {
 
     var targetName: String? { capturedTarget?.applicationName }
 
+    /// Bundle identifier of the app that had focus. Used to pick a mode automatically, which is
+    /// why it is read at capture time along with everything else rather than looked up later.
+    var targetBundleID: String? { capturedTarget?.bundleIdentifier }
+
     // MARK: - Injection
 
     @discardableResult

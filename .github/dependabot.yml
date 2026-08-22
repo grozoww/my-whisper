@@ -1,0 +1,27 @@
+# Dependency updates arrive as pull requests, so every version bump goes through the same build,
+# test and audit as any other change. Nothing updates itself.
+version: 2
+
+updates:
+  # Swift packages are pinned to exact versions in the project, which means a security fix does
+  # not arrive on its own — this is what tells us one exists.
+  - package-ecosystem: swift
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    labels: [dependencies]
+
+  # A compromised GitHub Action has the same reach as a compromised library, and the release
+  # workflow holds the signing certificate.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+    labels: [dependencies, ci]

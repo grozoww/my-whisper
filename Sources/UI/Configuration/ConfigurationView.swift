@@ -1,0 +1,431 @@
+import SwiftUI
+
+/// Everything that is not a mode, a word, a sound or a transcript.
+struct ConfigurationView: View {
+    @Environment(AppState.self) private var appState
+
+    @State private var apiKeyField = ""
+    @State private var keySaved = false
+
+    var body: some View {
+        @Bindable var settings = appState.settings
+
+        SettingsPage {
+            SettingsSection(title: "Dictation") {
+                SettingsRow(
+                    symbol: "globe",
+                    title: "Language",
+                    detail: languageDetail
+                ) {
+                    Picker("Language", selection: $settings.settings.dictation.language) {
+                        ForEach(SpeechLanguage.allCases) { language in
+                            Text(language.displayName).tag(language)
+                        }
+                    }
+                    .frame(width: 190)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "cpu",
+                    title: "Engine",
+                    detail: "Offline runs on this Mac. Cloud sends audio to Soniox with your key."
+                ) {
+                    Picker("Engine", selection: $settings.settings.dictation.provider) {
+                        Text("Parakeet (offline)").tag(TranscriptionProviderID.parakeet)
+                        Text("Soniox (cloud)").tag(TranscriptionProviderID.soniox)
+                    }
+                    .frame(width: 190)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "arrow.triangle.branch",
+                    title: "Use the cloud model for languages Parakeet cannot handle",
+                    detail: "Off means Chinese and Japanese fail with an explanation instead of uploading your audio. Audio never leaves this Mac unless this is on."
+                ) {
+                    Toggle("", isOn: $settings.settings.dictation.allowCloudFallback)
+                        .toggleStyle(.switch)
+                }
+            }
+
+            SettingsSection(title: "Hotkey") {
+                SettingsRow(
+                    symbol: "hand.tap",
+                    title: "How the hotkey behaves",
+                    detail: "Toggle: press to start, press again to stop. Hold: record only while held."
+                ) {
+                    Picker("Mode", selection: $settings.settings.dictation.hotkeyMode) {
+                        Text("Press to toggle").tag(HotkeyMode.toggle)
+                        Text("Hold to talk").tag(HotkeyMode.pushToTalk)
+                    }
+                    .frame(width: 190)
+                }
+                RowDivider()
+                HotkeyRecorderRow(
+                    title: "Shortcut",
+                    detail: "Modifier-only combinations are allowed, and are the point — ⌥⌘⌃⇧ collides with nothing.",
+                    chord: $settings.settings.dictation.toggleChord
+                )
+                RowDivider()
+                HotkeyRecorderRow(
+                    title: "Hold-to-talk key",
+                    detail: "Held down, records; released, stops. fn is the default — it is under your thumb and no app uses it. Works alongside the shortcut above.",
+                    chord: pushToTalkBinding,
+                    allowsSingleModifier: true,
+                    onClear: { settings.settings.dictation.pushToTalkChord = nil }
+                )
+                RowDivider()
+                SettingsRow(
+                    symbol: "escape",
+                    title: "Cancel a recording",
+                    detail: "Escape, while recording. The audio is discarded and nothing is pasted."
+                ) {
+                    KeycapRow(glyphs: ["esc"])
+                }
+            }
+
+            SettingsSection(
+                title: "Cleanup",
+                subtitle: "What happens to the transcript between the speech model and your text field."
+            ) {
+                SettingsRow(
+                    symbol: "wand.and.stars",
+                    title: "Clean up transcripts",
+                    detail: "Off pastes exactly what the speech model produced, filler and all."
+                ) {
+                    Toggle("", isOn: $settings.settings.refinement.isEnabled).toggleStyle(.switch)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "sparkles",
+                    title: "Clean up with the on-device model",
+                    detail: appState.onDeviceRefiner.availability.explanation
+                ) {
+                    Toggle("", isOn: $settings.settings.refinement.useOnDeviceModel)
+                        .toggleStyle(.switch)
+                        .disabled(!appState.onDeviceRefiner.availability.isAvailable)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "app.badge",
+                    title: "Switch modes by app",
+                    detail: "Pick the mode that claims the app you are typing into."
+                ) {
+                    Toggle("", isOn: $settings.settings.refinement.autoSwitchByApp).toggleStyle(.switch)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "list.bullet",
+                    title: "Mode",
+                    detail: "Used when no mode claims the focused app."
+                ) {
+                    Picker("Mode", selection: $settings.settings.refinement.activeModeID) {
+                        ForEach(appState.modes.modes) { mode in
+                            Text(mode.name).tag(Optional(mode.id))
+                        }
+                    }
+                    .frame(width: 190)
+                }
+            }
+
+            SettingsSection(
+                title: "Soniox API key",
+                subtitle: "Stored in the macOS Keychain, never in a file or a log, and only ever sent to Soniox."
+            ) {
+                SettingsRow(
+                    symbol: KeychainStore.has(.soniox) ? "key.fill" : "key",
+                    title: KeychainStore.has(.soniox) ? "A key is saved" : "No key saved",
+                    detail: "Get one at soniox.com. The app works fully without it — the key only unlocks the cloud languages.",
+                    tint: KeychainStore.has(.soniox) ? .green : .secondary
+                ) {
+                    HStack(spacing: 8) {
+                        SecureField("sk-…", text: $apiKeyField)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 180)
+                        Button(keySaved ? "Saved" : "Save") {
+                            KeychainStore.write(apiKeyField, for: .soniox)
+                            apiKeyField = ""
+                            keySaved = true
+                            appState.models.refresh()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(apiKeyField.isEmpty)
+                    }
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "trash",
+                    title: "Remove the saved key",
+                    detail: "Deletes it from the Keychain. The cloud languages stop working until a new key is added."
+                ) {
+                    Button("Remove") {
+                        KeychainStore.delete(.soniox)
+                        keySaved = false
+                        appState.models.refresh()
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!KeychainStore.has(.soniox))
+                }
+            }
+
+            SettingsSection(title: "Appearance") {
+                SettingsRow(symbol: "circle.lefthalf.filled", title: "Theme") {
+                    Picker("Theme", selection: $settings.settings.appearance.theme) {
+                        ForEach(Theme.allCases) { theme in
+                            Label(theme.title, systemImage: theme.symbol).tag(theme)
+                        }
+                    }
+                    .frame(width: 150)
+                }
+                RowDivider()
+                SettingsRow(symbol: "paintpalette", title: "Accent colour") {
+                    Picker("Accent", selection: $settings.settings.appearance.accent) {
+                        ForEach(AccentTint.allCases) { tint in
+                            Text(tint.title).tag(tint)
+                        }
+                    }
+                    .frame(width: 150)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "capsule",
+                    title: "Show the recording pill",
+                    detail: "Off leaves only the menu bar icon to show that recording is live."
+                ) {
+                    Toggle("", isOn: $settings.settings.appearance.showPill).toggleStyle(.switch)
+                }
+                RowDivider()
+                SettingsRow(
+                    symbol: "dock.rectangle",
+                    title: "Show in the Dock",
+                    detail: "OurWhisper is a menu bar app, so by default it has no Dock icon and does not appear in command-tab. Turn this on if you would rather find it the ordinary way."
+                ) {
+                    Toggle("", isOn: $settings.settings.appearance.showInDock).toggleStyle(.switch)
+                }
+            }
+
+            UpdatesSection()
+
+            SettingsSection(title: "Reset") {
+                SettingsRow(
+                    symbol: "arrow.counterclockwise",
+                    title: "Reset settings to defaults",
+                    detail: "Leaves your modes, vocabulary, history, API key and downloaded models alone. Each of those has its own delete button."
+                ) {
+                    Button("Reset") { appState.settings.resetToDefaults() }
+                        .buttonStyle(.bordered)
+                }
+            }
+        }
+        .onChange(of: appState.settings.settings.appearance.theme) { _, theme in
+            theme.apply()
+        }
+        .onChange(of: appState.settings.settings.dictation) { _, _ in
+            appState.dictation.applySettings()
+        }
+        .onChange(of: appState.settings.settings.appearance.showInDock) { _, showInDock in
+            WindowPresenter.setShowsDockIcon(showInDock)
+        }
+    }
+
+    /// The stored chord is optional — "no hold-to-talk key" is a real state. The recorder wants a
+    /// non-optional binding, so an unbound chord reads as empty and writing an empty one clears it.
+    private var pushToTalkBinding: Binding<HotkeyChord> {
+        Binding(
+            get: { appState.settings.settings.dictation.pushToTalkChord ?? HotkeyChord(modifiers: []) },
+            set: { appState.settings.settings.dictation.pushToTalkChord = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    private var languageDetail: String {
+        let language = appState.settings.settings.dictation.language
+        if language.isLocal {
+            return "Handled offline by Parakeet."
+        }
+        return appState.settings.settings.dictation.allowCloudFallback
+            ? "Not covered offline — this language goes to Soniox."
+            : "Not covered offline. Turn on the cloud switch below, or this language will refuse to transcribe."
+    }
+}
+
+// MARK: - Updates
+
+private struct UpdatesSection: View {
+    @Environment(AppState.self) private var appState
+
+    var body: some View {
+        @Bindable var settings = appState.settings
+
+        SettingsSection(
+            title: "Updates",
+            subtitle: "The only request the app makes on its own. It is an unauthenticated read of the public releases page — nothing about you or this Mac is sent."
+        ) {
+            SettingsRow(
+                symbol: "arrow.down.circle",
+                title: "Check for updates automatically",
+                detail: statusDetail
+            ) {
+                Toggle("", isOn: $settings.settings.updates.checkAutomatically).toggleStyle(.switch)
+            }
+            RowDivider()
+            SettingsRow(
+                symbol: "magnifyingglass",
+                title: "Check now",
+                detail: "Version \(UpdateChecker.currentVersion)"
+            ) {
+                Button("Check") {
+                    Task {
+                        await appState.updates.check(force: true)
+                        appState.settings.settings.updates.lastCheck = Date()
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(appState.updates.state == .checking)
+            }
+        }
+    }
+
+    private var statusDetail: String {
+        switch appState.updates.state {
+        case .idle:
+            "Not checked yet this session."
+        case .checking:
+            "Checking…"
+        case .upToDate(let date):
+            "Up to date, checked \(date.formatted(date: .abbreviated, time: .shortened))."
+        case .available(let release):
+            "Version \(release.version) is available."
+        case .failed(let message):
+            message
+        }
+    }
+}
+
+// MARK: - Hotkey recorder
+
+/// Captures the next chord the user presses.
+///
+/// A plain shortcut control cannot express this: the app's default binding is four modifiers and
+/// no key, and the push-to-talk default is fn alone. Neither is a shortcut AppKit will record.
+///
+/// The interaction that matters is **commit on release**. You press the combination, let go, and
+/// it is saved — the same as every other shortcut recorder on the platform. Committing on the way
+/// *down* would save a half-pressed chord, since holding ⌥⌘⌃⇧ arrives as four separate events.
+struct HotkeyRecorderRow: View {
+    let title: String
+    let detail: String
+    @Binding var chord: HotkeyChord
+    /// Push-to-talk wants a single modifier (fn); the toggle chord wants at least two so a stray
+    /// ⇧ on the way to the real combination is not recorded as the shortcut.
+    var allowsSingleModifier: Bool = false
+    var onClear: (() -> Void)?
+
+    @State private var isRecording = false
+    @State private var monitor: Any?
+    /// The largest set of modifiers seen during this recording. Held down is a sequence of
+    /// events; this is what the user actually pressed.
+    @State private var candidate: CGEventFlags = []
+
+    var body: some View {
+        SettingsRow(
+            symbol: "keyboard",
+            title: title,
+            detail: isRecording ? "Press the keys, then let go. Escape cancels." : detail
+        ) {
+            HStack(spacing: 8) {
+                if isRecording, !candidate.isEmpty {
+                    KeycapRow(glyphs: HotkeyChord(modifiers: candidate).displayGlyphs)
+                } else if !chord.isEmpty {
+                    KeycapRow(glyphs: chord.displayGlyphs)
+                } else {
+                    Text("None").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+
+                Button(isRecording ? "Listening…" : "Change") {
+                    isRecording ? cancel() : record()
+                }
+                .buttonStyle(.bordered)
+
+                if let onClear, !chord.isEmpty, !isRecording {
+                    Button {
+                        onClear()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .help("Unbind this shortcut")
+                }
+            }
+        }
+        .onDisappear { cancel() }
+    }
+
+    private func record() {
+        isRecording = true
+        candidate = []
+
+        // A local monitor, not a global one: this window has focus while recording a shortcut, and
+        // a global tap would need the same Accessibility permission for no extra benefit.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
+            guard isRecording else { return event }
+
+            let flags = CGEventFlags(rawValue: UInt64(event.modifierFlags.rawValue))
+                .intersection(HotkeyChord.significantFlags)
+
+            if event.type == .keyDown {
+                if event.keyCode == 53 { cancel(); return nil }  // escape
+                chord = HotkeyChord(keyCode: CGKeyCode(event.keyCode), modifiers: flags)
+                finish()
+                return nil
+            }
+
+            // Still going down: remember the widest combination reached so far.
+            if flags.rawValue > candidate.rawValue || flags.isSuperset(of: candidate) {
+                candidate = flags
+                return nil
+            }
+
+            // Coming back up. The moment the first key is released, what was held is the answer.
+            if !candidate.isEmpty, !flags.isSuperset(of: candidate) {
+                if allowsSingleModifier || candidate.hasAtLeastTwoModifiers {
+                    chord = HotkeyChord(modifiers: candidate)
+                    finish()
+                } else {
+                    // Too few keys to be a safe global shortcut. Start over rather than binding
+                    // something that would fire constantly.
+                    candidate = []
+                }
+                return nil
+            }
+
+            return nil
+        }
+    }
+
+    private func finish() {
+        isRecording = false
+        candidate = []
+        removeMonitor()
+    }
+
+    private func cancel() {
+        isRecording = false
+        candidate = []
+        removeMonitor()
+    }
+
+    private func removeMonitor() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+}
+
+private extension CGEventFlags {
+    var isEmpty: Bool { rawValue == 0 }
+
+    /// Two or more bits set. A single modifier held for a fraction of a second is something people
+    /// do by accident all day; two is deliberate.
+    var hasAtLeastTwoModifiers: Bool {
+        rawValue != 0 && rawValue & (rawValue - 1) != 0
+    }
+}

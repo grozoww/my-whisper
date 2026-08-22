@@ -31,6 +31,18 @@ struct HotkeyChord: Codable, Equatable, Sendable {
     /// The reference app's default: hold all four standard modifiers.
     static let hyper = HotkeyChord(modifiers: [.maskCommand, .maskAlternate, .maskControl, .maskShift])
 
+    /// The fn / 🌐 key on its own. The natural push-to-talk key: it is under your left thumb, it
+    /// is not part of any application shortcut, and holding it does nothing on its own.
+    ///
+    /// One caveat worth knowing — macOS may claim a *tap* of fn for its own "Press 🌐 to…" action
+    /// depending on the Keyboard settings. Holding it, which is what push-to-talk does, is not
+    /// affected.
+    static let fn = HotkeyChord(modifiers: [.maskSecondaryFn])
+
+    /// True when nothing is bound. An empty modifier set with no key can never be satisfied, so
+    /// this is what "no shortcut" looks like rather than a sentinel key code.
+    var isEmpty: Bool { keyCode == nil && modifierBits == 0 }
+
     /// Keycap glyphs, in the order macOS displays them.
     var displayGlyphs: [String] {
         var glyphs: [String] = []

@@ -5,7 +5,7 @@ Local dictation for macOS. Hold a hotkey, talk, and the text lands in whatever f
 Transcription runs on your Mac's Neural Engine. No audio leaves the machine unless you explicitly
 turn on the optional cloud provider. There is no account, no telemetry, and no paid tier.
 
-> Status: early development. Not yet usable — see [Roadmap](#roadmap).
+> Status: feature-complete and building from source. Not yet released — see [Roadmap](#roadmap).
 
 ## Why another one
 
@@ -30,13 +30,17 @@ the optional cloud provider instead.
 ## Features
 
 - **Global hotkey** — toggle, or push-to-talk. Text is pasted into the focused field of any app.
-- **Fully offline by default** — Parakeet for speech, a local LLM for cleanup. Zero API keys needed.
+- **Fully offline by default** — Parakeet for speech, on-device cleanup. Zero API keys, zero
+  accounts, and nothing to download beyond the speech model.
 - **Modes** — per-profile prompts that clean up the raw transcript: drop `mm` and `hmm`, resolve
   self-corrections ("send it Tuesday, no, Wednesday" becomes "send it Wednesday"), set the tone.
   Modes can auto-switch based on the app you are typing into.
 - **Menu bar app** with a floating pill overlay and live audio bars while recording.
-- **Vocabulary** — teach it your names, jargon, and spellings.
-- **History** — searchable, stored locally, with a retention setting.
+- **Vocabulary** — teach it your names, jargon, and spellings. Applied as an exact rule, not a
+  hint to a model, so it works every time.
+- **History** — searchable, stored locally, with a retention setting that actually deletes. Keeps
+  the raw transcript next to the cleaned one, so a bad result can be traced to the stage that
+  caused it.
 
 ## Languages
 
@@ -48,11 +52,26 @@ Online (optional, Soniox): 60+ including Chinese and Japanese. Requires your own
 ## Requirements
 
 - macOS 15 (Sequoia) or later, Apple Silicon
-- ~600 MB disk for the speech model, ~2.5 GB more if you want local LLM cleanup
+- ~600 MB disk for the speech model, downloaded once on first launch
+- Optional: macOS 26 with Apple Intelligence enabled, for model-based cleanup. Nothing to
+  download, and the rule-based cleanup works without it on every supported version.
 
 ## Install
 
-Not yet released. Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+Download the DMG from [Releases](https://github.com/grozoww/my-whisper/releases), open it, and
+drag OurWhisper to Applications.
+
+Builds that are not notarized are marked as pre-releases. macOS refuses those on a plain
+double-click — **right-click the app in Applications and choose Open** instead, once. That warning
+means Apple has not vouched for the build, which costs $99 a year, not that anything is wrong with
+it. Every release says which kind it is.
+
+OurWhisper then asks for Microphone and Accessibility permission, and both are required: the
+microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.
+It is a menu bar app — look for the microphone icon in the menu bar, not the Dock. There is a
+"Show in the Dock" switch in Configuration if you would rather have one.
+
+Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy
 
@@ -61,19 +80,33 @@ Not yet released. Building from source is documented in [CONTRIBUTING.md](CONTRI
 - API keys you paste are stored in the **macOS Keychain**, never in a config file or a log, and
   are only ever sent to that provider.
 
+## How cleanup works
+
+Two stages, in this order, and the second is optional.
+
+**Rules** run first: filler removal, self-corrections, spoken punctuation, sentence casing, and
+your vocabulary list. They are pure functions — instant, deterministic, and identical every time.
+They run on every dictation regardless of what else is available.
+
+**The on-device model** runs second, if you turn it on. It handles what rules cannot: tone,
+phrasing, and judgement about what you meant. If it is unavailable, slow, or returns something
+implausible, the rule-cleaned text is used instead. A model problem costs you latency, never words.
+
 ## Roadmap
 
-- [ ] **P0** Project skeleton, permissions, menu bar, window shell
-- [ ] **P1** Core loop: record, transcribe with Parakeet, paste. Hotkey and pill overlay
-- [ ] **P2** Soniox cloud provider, model library and downloads
-- [ ] **P3** Modes, prompt cleanup with local LLM, vocabulary
-- [ ] **P4** History, sound settings, themes, auto-update
+- [x] **P0** Project skeleton, permissions, menu bar, window shell
+- [x] **P1** Core loop: record, transcribe with Parakeet, paste. Hotkey and pill overlay
+- [x] **P2** Soniox cloud provider, model library and downloads
+- [x] **P3** Modes, on-device cleanup, vocabulary
+- [x] **P4** History, sound settings, themes, update check
+- [ ] **P5** First signed and notarized release
 
 ## Credits
 
 - [NVIDIA Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) — CC-BY-4.0
 - [FluidAudio](https://github.com/FluidInference/FluidAudio) — CoreML runtime for Parakeet
-- [MLX Swift](https://github.com/ml-explore/mlx-swift-lm) — on-device LLM for cleanup
+- Apple's [Foundation Models](https://developer.apple.com/documentation/foundationmodels) — the
+  on-device language model used for cleanup on macOS 26
 
 ## License
 

@@ -33,3 +33,6 @@ dist/
 *.provisionprofile
 .env
 .env.*
+
+# CI writes the build transcript here to grep it for warnings.
+build.log

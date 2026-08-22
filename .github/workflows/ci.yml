@@ -4,15 +4,23 @@ on:
   push:
     branches: [main]
   pull_request:
+  # The dependency audit is time-dependent in a way the other jobs are not: an advisory can be
+  # published for code that has not changed. A weekly run catches that without waiting for a PR.
+  schedule:
+    - cron: '17 6 * * 1'
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    name: Build
+    name: Build and test
     runs-on: macos-latest
+    if: github.event_name != 'schedule'
 
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +42,61 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      # No API key, no network, no microphone, no Accessibility permission. Anything that needs
+      # one of those is either injected in the test or not tested here — see Tests/TestSupport.swift.
+      - name: Test
+        run: |
+          xcodebuild \
+            -project OurWhisper.xcodeproj \
+            -scheme OurWhisper \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            test
+
+      # CONTRIBUTING.md makes a warning-free build a rule, because the Swift 6 concurrency warnings
+      # in the audio path are real defects rather than noise. Enforcing it here is what keeps that
+      # rule from decaying into a suggestion.
+      - name: Fail on warnings
+        run: |
+          xcodebuild \
+            -project OurWhisper.xcodeproj \
+            -scheme OurWhisper \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            clean build 2>&1 | tee build.log
+
+          if grep -E '^/.*warning:' build.log; then
+            echo "::error::The build produced warnings. See CONTRIBUTING.md — keep the build warning-free."
+            exit 1
+          fi
+
+  audit:
+    name: Dependency audit
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pinning and lockfile drift. Fails if a dependency moved to a version range, if a branch is
+      # being tracked, or if Package.resolved was not committed alongside a version change.
+      - name: Check pinning
+        run: ./scripts/audit-deps.sh --pins
+
+      # Queries osv.dev, which carries the GitHub Advisory Database. Only public package names and
+      # versions leave the runner.
+      - name: Check for known vulnerabilities
+        run: ./scripts/audit-deps.sh --vulns
+
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule'
+
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Guard against committed secrets
         run: |
           if git ls-files | grep -Ei '\.(p12|cer|mobileprovision|provisionprofile)$|(^|/)\.env'; then
@@ -41,3 +104,24 @@ jobs:
             exit 1
           fi
           echo "No credential files tracked."
+
+      # An API key in a source file would be caught by review; one in a fixture or a script is
+      # exactly the kind of thing that is not. CONTRIBUTING.md forbids both.
+      - name: Guard against key-shaped strings
+        run: |
+          if git grep -nEI '(sk-[A-Za-z0-9]{16,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{20,})' -- \
+               ':!.github/workflows' ':!Tests/*' ':!Sources/UI/*'; then
+            echo "::error::Something that looks like a credential is committed. Remove it and rotate it."
+            exit 1
+          fi
+          echo "No key-shaped strings found."
+
+      # A workflow pinned to a moving branch runs whatever that branch contains today. Every action
+      # here must name a release tag.
+      - name: Check action pinning
+        run: |
+          if grep -rnE 'uses: .*@(main|master)$' .github/workflows; then
+            echo "::error::A workflow action is pinned to a branch. Pin it to a release tag."
+            exit 1
+          fi
+          echo "All actions pinned to tags."
