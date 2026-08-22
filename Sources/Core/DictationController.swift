@@ -52,7 +52,12 @@ final class DictationController {
 
         // Load the model now rather than on the first hotkey press. A 600 MB download the first
         // time you try to dictate would feel like the app is broken.
-        Task { await prepareModel() }
+        Task {
+            await prepareModel()
+            if let path = SelfTest.requestedPath {
+                await SelfTest.run(path: path, language: SelfTest.requestedLanguage, provider: provider)
+            }
+        }
     }
 
     /// Re-arms after the user grants Accessibility, which can happen long after launch.

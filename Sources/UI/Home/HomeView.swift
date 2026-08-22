@@ -3,56 +3,134 @@ import SwiftUI
 struct HomeView: View {
     @Environment(AppState.self) private var appState
 
+    private var permissionsPending: Bool { !appState.permissions.allGranted }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 StatsCard()
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Get started")
-                        .font(.system(size: 17, weight: .semibold))
-
-                    Card {
-                        PermissionRow(
-                            title: "Allow microphone access",
-                            detail: "OurWhisper only opens the mic while you hold the hotkey.",
-                            status: appState.permissions.microphone,
-                            action: { Task { await appState.permissions.requestMicrophone() } },
-                            settingsPane: .microphone
-                        )
-                        Divider().padding(.leading, 52)
-                        PermissionRow(
-                            title: "Allow accessibility access",
-                            detail: "Needed to watch for the hotkey and paste into the focused field.",
-                            status: appState.permissions.accessibility,
-                            action: { appState.permissions.requestAccessibility() },
-                            settingsPane: .accessibility
-                        )
+                if permissionsPending {
+                    section("Finish setup") {
+                        Card {
+                            PermissionRow(
+                                title: "Allow microphone access",
+                                detail: "OurWhisper only opens the mic while you hold the hotkey.",
+                                status: appState.permissions.microphone,
+                                action: { Task { await appState.permissions.requestMicrophone() } },
+                                settingsPane: .microphone
+                            )
+                            Divider().padding(.leading, 52)
+                            PermissionRow(
+                                title: "Allow accessibility access",
+                                detail: "Needed to watch for the hotkey and paste into the focused field.",
+                                status: appState.permissions.accessibility,
+                                action: { appState.permissions.requestAccessibility() },
+                                settingsPane: .accessibility
+                            )
+                        }
                     }
                 }
 
-                if appState.permissions.allGranted {
+                section("Get started") {
                     Card {
-                        HStack(spacing: 12) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
-                                .font(.system(size: 18))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Permissions are set")
-                                    .font(.system(size: 14, weight: .medium))
-                                Text("Recording and transcription arrive in P1.")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                        }
-                        .padding(14)
+                        HotkeyRow(armed: appState.dictation.hotkeyArmed)
+                        Divider().padding(.leading, 52)
+                        ModelRow(phase: appState.dictation.phase)
                     }
                 }
             }
             .padding(24)
             .frame(maxWidth: 760, alignment: .leading)
             .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func section(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.system(size: 17, weight: .semibold))
+            content()
+        }
+    }
+}
+
+// MARK: - Rows
+
+private struct HotkeyRow: View {
+    let armed: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: armed ? "record.circle" : "record.circle.fill")
+                .font(.system(size: 18))
+                .foregroundStyle(armed ? Color.accentColor : Color.secondary)
+                .frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Start recording").font(.system(size: 14, weight: .medium))
+                Text(armed
+                     ? "Hold these keys together, speak, then press again to finish."
+                     : "Waiting for Accessibility permission before the hotkey can be watched.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+            KeycapRow(glyphs: HotkeyChord.hyper.displayGlyphs)
+                .opacity(armed ? 1 : 0.4)
+        }
+        .padding(14)
+    }
+}
+
+private struct ModelRow: View {
+    let phase: DictationController.Phase
+
+    var body: some View {
+        HStack(spacing: 12) {
+            icon.font(.system(size: 18)).frame(width: 24)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Speech model").font(.system(size: 14, weight: .medium))
+                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            if case .preparingModel(let fraction) = phase {
+                ProgressView(value: fraction)
+                    .progressViewStyle(.linear)
+                    .frame(width: 110)
+            }
+        }
+        .padding(14)
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        switch phase {
+        case .failed:
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+        case .preparingModel:
+            Image(systemName: "arrow.down.circle").foregroundStyle(.secondary)
+        default:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+        }
+    }
+
+    private var detail: String {
+        switch phase {
+        case .preparingModel(let fraction):
+            "Downloading Parakeet TDT v3 — \(Int(fraction * 100))%"
+        case .failed(let message):
+            message
+        case .listening:
+            "Listening…"
+        case .transcribing:
+            "Transcribing…"
+        case .idle:
+            "Parakeet TDT v3, running offline on the Neural Engine."
         }
     }
 }
@@ -110,7 +188,7 @@ private struct PermissionRow: View {
                 Button("Allow", action: action).buttonStyle(.borderedProminent)
             case .denied:
                 // macOS shows its prompt only once. After a denial the only route is Settings,
-                // so offering "Allow" again would just do nothing and look broken.
+                // so offering "Allow" again would do nothing and look broken.
                 Button("Open Settings") { appState.permissions.openSettings(for: settingsPane) }
                     .buttonStyle(.bordered)
             }
