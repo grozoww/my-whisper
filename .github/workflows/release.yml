@@ -5,6 +5,12 @@ name: Release
 on:
   push:
     tags: ['v*']
+    # Every push to main refreshes a single rolling prerelease tagged `latest`, so there is always
+    # a DMG to download and `scripts/install.sh` has something to find without anyone cutting a
+    # tag. Versioned releases still come from tags, and this never overwrites one: the rolling
+    # build has a tag of its own and is marked prerelease, so GitHub keeps showing the newest real
+    # release as the latest.
+    branches: [main]
   # Lets you produce a downloadable build before you have an Apple Developer account, and lets you
   # rehearse the whole thing without cutting a tag.
   workflow_dispatch:
@@ -14,8 +20,16 @@ on:
         type: boolean
         default: false
 
+# A second push to main while the first is still packaging would race to move the same tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
+
+env:
+  ROLLING_TAG: latest
 
 jobs:
   release:
@@ -84,22 +98,50 @@ jobs:
       # package.sh writes the wording; this puts it where the person downloading will see it.
       - name: Assemble release notes
         run: |
-          if [ -f dist/INSTALL.md ]; then
-            cat dist/INSTALL.md > release-notes.md
-            printf '\n---\n\n' >> release-notes.md
-          else
-            : > release-notes.md
+          : > release-notes.md
+          if [ "${{ github.ref_type }}" != "tag" ]; then
+            cat >> release-notes.md <<'ROLLING'
+          > **Rolling build.** Rebuilt from `main` on every push, so this tag moves and its
+          > contents change. For something that stays put, use a versioned release.
+
+          ROLLING
           fi
+          if [ -f dist/INSTALL.md ]; then
+            cat dist/INSTALL.md >> release-notes.md
+            printf '\n---\n\n' >> release-notes.md
+          fi
+
+      # The rolling tag is reused, so last push's DMG is still attached to it. Assets are matched
+      # by filename and the filename carries the version, so a version bump would otherwise leave
+      # two DMGs on one release and install.sh could pick either. Deleting the release outright is
+      # the only way to be sure exactly one build is attached.
+      - name: Clear the previous rolling build
+        # Pushes to main only. A manual run publishes to a build-<n> tag of its own, and must not
+        # take the rolling release down with it.
+        if: github.event_name == 'push' && github.ref_type != 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release delete "$ROLLING_TAG" --yes --cleanup-tag || true
 
       - name: Publish
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.dmg
+          # SHA256SUMS is what scripts/install.sh checks the download against.
+          files: |
+            dist/*.dmg
+            dist/SHA256SUMS
           body_path: release-notes.md
           generate_release_notes: true
-          # workflow_dispatch has no tag of its own; naming one keeps repeat runs from colliding.
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('build-{0}', github.run_number) }}
-          prerelease: ${{ env.SIGNED == 'false' }}
+          # A tag push keeps its own tag. A push to main reuses one rolling tag, so main builds
+          # stay a single release rather than accumulating one per commit. workflow_dispatch gets a
+          # run number, so a rehearsal collides with neither.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && env.ROLLING_TAG || format('build-{0}', github.run_number)) }}
+          name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && format('Rolling build ({0})', github.run_number) || format('build-{0}', github.run_number)) }}
+          target_commitish: ${{ github.sha }}
+          # Anything that is not a notarized tag is a prerelease, so GitHub keeps pointing people
+          # at the newest real release rather than at whatever main happens to contain today.
+          prerelease: ${{ env.SIGNED == 'false' || github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' && env.SIGNED == 'true' }}
 
       - name: Clean up keychain
         if: always() && env.SIGNED == 'true'

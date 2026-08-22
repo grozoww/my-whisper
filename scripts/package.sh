@@ -58,6 +58,16 @@ else
   echo
 fi
 
+# scripts/install.sh checks the download against this. It is served from the same host as the
+# DMG, so it proves nothing about the publisher — it catches a truncated or corrupted download,
+# which over a 100 MB file on a bad connection is the failure people actually hit.
+write_checksums() {
+  # `./*.dmg` guards against a filename that starts with a dash; the sed drops the prefix again
+  # so the file reads the way a SHA256SUMS is expected to.
+  (cd "$DIST_DIR" && shasum -a 256 ./*.dmg | sed 's| \./| |' > SHA256SUMS)
+  echo "==> Wrote $DIST_DIR/SHA256SUMS"
+}
+
 rm -rf "$BUILD_DIR" "$DIST_DIR"
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
@@ -130,6 +140,7 @@ if [ "$NOTARIZE" = true ]; then
   echo
   echo "✓ $DMG is signed, notarized and stapled."
   spctl --assess --type open --context context:primary-signature -vv "$DMG" || true
+  write_checksums
 else
   # Written to a file rather than printed, so the release workflow can paste it into the release
   # notes verbatim. Someone who downloads an app that refuses to open and is given no explanation
@@ -137,28 +148,42 @@ else
   cat > "$DIST_DIR/INSTALL.md" <<INSTALL
 ## Installing
 
+\`\`\`bash
+curl -fsSL https://raw.githubusercontent.com/grozoww/my-whisper/main/scripts/install.sh | bash
+\`\`\`
+
+That downloads this DMG, copies OurWhisper to Applications, and clears the download quarantine
+flag. The last step is the one that matters: this build is **not notarized**, and macOS refuses to
+open an unnotarized download at all — the dialog claims the app is damaged, which is untrue.
+Notarization needs a paid Apple Developer account.
+
+### By hand instead
+
 1. Open the DMG and drag **OurWhisper** to Applications.
 2. **Right-click OurWhisper in Applications and choose Open**, then confirm.
 
-Step 2 is needed only the first time. A plain double-click will say the app "cannot be opened
-because Apple cannot check it for malicious software" — that means this build is not notarized,
-not that anything is wrong with it. Notarization needs a paid Apple Developer account.
-
-If macOS refuses even after right-click → Open, clear the download quarantine flag:
+If macOS still refuses, clear the flag yourself:
 
 \`\`\`bash
 xattr -dr com.apple.quarantine /Applications/OurWhisper.app
 \`\`\`
 
-OurWhisper then asks for **Microphone** and **Accessibility** permission. Both are required:
-the microphone to hear you, Accessibility to watch for the hotkey and paste into the focused
-field. It is a menu bar app — look for the microphone icon in the menu bar, not the Dock.
+### First run
+
+OurWhisper asks for **Microphone** and **Accessibility** permission. Both are required: the
+microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.
+It is a menu bar app — look for the microphone icon in the menu bar, not the Dock.
+
+Because these builds are ad-hoc signed, the signature changes with every release. macOS treats
+that as a different app and drops the Accessibility grant, so after an update you may have to
+re-tick OurWhisper in System Settings › Privacy & Security › Accessibility.
 INSTALL
 
   echo
   echo "✓ $DMG is built and ad-hoc signed."
   echo "  Not notarized, so Gatekeeper will warn on first open."
   echo "  Ship $DIST_DIR/INSTALL.md alongside it, or paste it into the release notes."
+  write_checksums
 fi
 
 ls -lh "$DIST_DIR"
