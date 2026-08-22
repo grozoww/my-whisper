@@ -66,6 +66,9 @@ the optional cloud provider instead.
   self-corrections ("send it Tuesday, no, Wednesday" becomes "send it Wednesday"), set the tone.
   Modes can auto-switch based on the app you are typing into.
 - **Menu bar app** with a floating pill overlay and live audio bars while recording.
+- **Clipboard as context** — off by default, per mode. When it is on, whatever you have copied is
+  shown to the on-device model as reference for spelling names and terms. It is never pasted, and
+  a password copied from a password manager is skipped.
 - **Vocabulary** — teach it your names, jargon, and spellings. Applied as an exact rule, not a
   hint to a model, so it works every time.
 - **History** — searchable, stored locally, with a retention setting that actually deletes. Keeps
@@ -141,6 +144,9 @@ Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 - No telemetry. No crash reporting. No network calls unless you enable a cloud provider.
 - API keys you paste are stored in the **macOS Keychain**, never in a config file or a log, and
   are only ever sent to that provider.
+- The clipboard is only read to paste, unless you switch on "Use the clipboard as context" in a
+  mode. Then it is read at the moment you start speaking, shown to the on-device model, and
+  dropped — it is never written to history and never sent anywhere.
 
 ## How cleanup works
 
@@ -151,7 +157,8 @@ your vocabulary list. They are pure functions — instant, deterministic, and id
 They run on every dictation regardless of what else is available.
 
 **The on-device model** runs second, if you turn it on. It handles what rules cannot: tone,
-phrasing, and judgement about what you meant. If it is unavailable, slow, or returns something
+phrasing, and judgement about what you meant. Per mode, it can also be shown your clipboard as
+reference — useful for replying to a message whose names you would otherwise have to spell out. If it is unavailable, slow, or returns something
 implausible, the rule-cleaned text is used instead. A model problem costs you latency, never words.
 
 ## Roadmap

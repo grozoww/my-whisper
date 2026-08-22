@@ -198,6 +198,18 @@ struct ModeStoreTests {
         _ = store.resolve(settings: settings, frontmostBundleID: nil)
     }
 
+    @Test("The clipboard is only read when some mode asks for it")
+    func reportsWhetherAnyModeWantsTheClipboard() {
+        let temp = TemporaryDirectory()
+        let store = ModeStore(directory: temp.url)
+        #expect(store.anyModeUsesClipboardContext == false)  // nothing ships with it on
+
+        var code = store.modes.first { $0.name == "Code" }!
+        code.usesClipboardContext = true
+        store.update(code)
+        #expect(store.anyModeUsesClipboardContext)
+    }
+
     @Test("Built-in modes cannot be deleted")
     func protectsBuiltIns() {
         let temp = TemporaryDirectory()

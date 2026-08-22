@@ -18,6 +18,13 @@ struct Mode: Codable, Identifiable, Equatable, Sendable {
 
     var cleanup: CleanupOptions = CleanupOptions()
 
+    /// Show the on-device model what is on the clipboard, as reference for spelling.
+    ///
+    /// Per mode rather than global because it is only ever worth the privacy cost in some of
+    /// them: dictating a reply wants the message you copied, dictating a password field does not.
+    /// Off everywhere by default — reading the clipboard is something the user asks for.
+    var usesClipboardContext: Bool = false
+
     /// Bundle identifiers this mode claims. When "switch by app" is on, focusing one of these
     /// selects this mode. Empty means the mode is only ever chosen by hand.
     var appBundleIDs: [String] = []
@@ -163,6 +170,7 @@ extension Mode {
         tint = container.value(.tint, or: defaults.tint)
         instructions = container.value(.instructions, or: defaults.instructions)
         cleanup = container.value(.cleanup, or: defaults.cleanup)
+        usesClipboardContext = container.value(.usesClipboardContext, or: defaults.usesClipboardContext)
         appBundleIDs = container.value(.appBundleIDs, or: defaults.appBundleIDs)
         isBuiltIn = container.value(.isBuiltIn, or: defaults.isBuiltIn)
     }

@@ -45,6 +45,9 @@ final class DictationController {
     private var levelTask: Task<Void, Never>?
     private var isRecording = false
 
+    /// What was on the clipboard when this dictation started. Held only until the text is pasted.
+    private var clipboardContext: String?
+
     init(
         settings: SettingsStore,
         modes: ModeStore,
@@ -168,6 +171,11 @@ final class DictationController {
         // under us, and the text would land in the wrong app.
         injector.captureTarget()
 
+        // Read now, for the same reason: this is the clipboard the user had when they started
+        // talking, and by the time the text is pasted the injector will have overwritten it. The
+        // check means a user with the toggle off nowhere never has their clipboard read at all.
+        clipboardContext = modes.anyModeUsesClipboardContext ? ClipboardContext.current() : nil
+
         do {
             try capture.start(deviceUID: settings.settings.sound.inputDeviceUID)
         } catch {
@@ -204,6 +212,7 @@ final class DictationController {
         hotkeys.isRecording = false
         stopLevelUpdates()
         _ = capture.stop()
+        clipboardContext = nil
         phase = .idle
         pill.hide()
         log.debug("Recording cancelled")
@@ -211,6 +220,10 @@ final class DictationController {
 
     private func transcribeAndInject(_ samples: [Float]) async {
         let current = settings.settings
+        let clipboard = clipboardContext
+        // Nothing below needs it again, and holding a copy of someone's clipboard between
+        // dictations is not something to do by accident.
+        clipboardContext = nil
 
         do {
             let provider = try router.provider(for: current.dictation)
@@ -242,7 +255,8 @@ final class DictationController {
                 mode: mode,
                 settings: current.refinement,
                 vocabulary: vocabulary.enabledEntries,
-                language: current.dictation.language
+                language: current.dictation.language,
+                clipboard: clipboard
             )
 
             let method = try await injector.inject(refined.text)
