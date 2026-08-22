@@ -124,7 +124,7 @@ jobs:
         run: gh release delete "$ROLLING_TAG" --yes --cleanup-tag || true
 
       - name: Publish
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # SHA256SUMS is what scripts/install.sh checks the download against.
           files: |
