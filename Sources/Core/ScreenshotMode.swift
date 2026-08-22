@@ -12,6 +12,8 @@ import SwiftUI
 /// the script presses the shutter.
 ///
 ///     OURWHISPER_SCREENSHOT=modes OURWHISPER_SCREENSHOT_THEME=dark <binary>
+///     OURWHISPER_SCREENSHOT=modes OURWHISPER_SCREENSHOT_SIZE=880x560 <binary>
+///     OURWHISPER_SCREENSHOT=modes OURWHISPER_SCREENSHOT_SIDEBAR=collapsed <binary>
 ///     OURWHISPER_SCREENSHOT=pill.listening <binary>
 ///
 /// The data in the picture is seeded below, never the user's: screenshot mode redirects
@@ -38,9 +40,31 @@ enum ScreenshotMode {
     }
 
     /// Fixed, so two runs of the script produce two images that can be diffed. Close to the
-    /// window's own 780×560 minimum on purpose: a taller window only adds empty space below the
-    /// Home screen's three rows, and empty space is what a screenshot has least use for.
-    static let windowSize = NSSize(width: 1000, height: 600)
+    /// window's own minimum on purpose: a taller window only adds empty space below the Home
+    /// screen's three rows, and empty space is what a screenshot has least use for.
+    ///
+    /// `OURWHISPER_SCREENSHOT_SIZE=880x560` overrides it. Layouts break at the small end, and the
+    /// small end is the one nobody looks at — this is how to look at it without dragging a corner.
+    static var windowSize: NSSize {
+        guard let raw = ProcessInfo.processInfo.environment["OURWHISPER_SCREENSHOT_SIZE"] else {
+            return NSSize(width: 1000, height: 600)
+        }
+        let parts = raw.lowercased().split(separator: "x").compactMap { Double($0) }
+        guard parts.count == 2 else { return NSSize(width: 1000, height: 600) }
+        return NSSize(width: parts[0], height: parts[1])
+    }
+
+    /// `OURWHISPER_SCREENSHOT_SIDEBAR=collapsed` hides the sidebar. What the detail pane does with
+    /// the extra width is one thing; what the screens with a list of their own do when they become
+    /// the leftmost thing in the window is another, and it is only visible this way.
+    ///
+    /// Set either way, never left alone: AppKit autosaves whether the sidebar is collapsed under
+    /// the app's own defaults domain, which a debug build shares with the installed one. Someone
+    /// who collapsed the sidebar in the real app would otherwise get README screenshots with no
+    /// sidebar in them.
+    static var sidebarCollapsed: Bool {
+        ProcessInfo.processInfo.environment["OURWHISPER_SCREENSHOT_SIDEBAR"] == "collapsed"
+    }
 
     nonisolated static var isActive: Bool { requestedRawValue != nil }
 
@@ -84,6 +108,11 @@ enum ScreenshotMode {
             return
         }
 
+        // Before the resize: uncollapsing the sidebar widens the window to make room for it, so
+        // doing it afterwards would hand back a window wider than the size asked for.
+        setSidebar(collapsed: sidebarCollapsed, in: window)
+        try? await Task.sleep(for: .milliseconds(300))
+
         // SwiftUI restores the window's last frame from `UserDefaults`, which is shared with
         // whatever size the person running this last dragged the real app to.
         window.setContentSize(windowSize)
@@ -116,6 +145,27 @@ enum ScreenshotMode {
         // Nothing else holds the controller, and releasing it takes the pill off screen before
         // the shutter. Sleeping here is what keeps it alive.
         while true { try? await Task.sleep(for: .seconds(60)) }
+    }
+
+    /// `NavigationSplitView` is an `NSSplitViewController` underneath, reachable as the split
+    /// view's delegate rather than through the window's content view controller. Setting
+    /// `isCollapsed` rather than sending `toggleSidebar:` is what makes the result the same
+    /// whichever state the autosaved defaults arrived in.
+    private static func setSidebar(collapsed: Bool, in window: NSWindow) {
+        guard let split = splitView(in: window.contentView),
+              let controller = split.delegate as? NSSplitViewController,
+              let sidebar = controller.splitViewItems.first
+        else { return }
+        sidebar.isCollapsed = collapsed
+    }
+
+    private static func splitView(in view: NSView?) -> NSSplitView? {
+        guard let view else { return nil }
+        if let split = view as? NSSplitView { return split }
+        for child in view.subviews {
+            if let found = splitView(in: child) { return found }
+        }
+        return nil
     }
 
     /// The main window, once SwiftUI has actually created it. It does not exist at the moment the

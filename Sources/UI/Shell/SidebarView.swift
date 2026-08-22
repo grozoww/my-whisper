@@ -6,7 +6,10 @@ struct SidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             List(selection: $selection) {
-                ForEach(Array(NavigationSection.groups.enumerated()), id: \.offset) { index, group in
+                // One `Section` per group. The whitespace between groups is the section break
+                // itself: padding a section pads every row inside it instead, which left the four
+                // rows below the first group 10pt taller than the three above them.
+                ForEach(NavigationSection.groups, id: \.self) { group in
                     Section {
                         ForEach(group) { section in
                             // An explicit HStack rather than `Label`. In a sidebar list, `Label`
@@ -24,8 +27,6 @@ struct SidebarView: View {
                         }
                     }
                     .listSectionSeparator(.hidden)
-                    // Groups are separated by whitespace, not a divider, matching the reference.
-                    .padding(.top, index == 0 ? 0 : 10)
                 }
             }
             .listStyle(.sidebar)

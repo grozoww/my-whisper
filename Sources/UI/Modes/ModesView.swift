@@ -65,7 +65,11 @@ struct ModesView: View {
                 Spacer()
             }
             .buttonStyle(.borderless)
-            .padding(8)
+            // Roomier than a plain 8 on purpose. With the sidebar collapsed this list is the
+            // leftmost thing in the window, and the window's rounded corner cuts through anything
+            // sitting tight against it.
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
         }
     }
 

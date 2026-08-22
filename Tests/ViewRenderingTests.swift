@@ -172,6 +172,31 @@ struct ViewRenderingTests {
         #expect(width(of: .failure("Could not paste. The text is on your clipboard.")) > listening)
     }
 
+    /// The bug this guards against: the row let its text column shrink without a floor, so in a
+    /// narrow pane the label lost the negotiation to the control beside it and wrapped one letter
+    /// per line — a nine-line "Symbol" in a row that should be two. Measuring the height is how
+    /// you tell, because the shredded layout is a perfectly valid one.
+    @Test("A settings row does not shred its label in a narrow pane")
+    func settingsRowStaysReadableWhenNarrow() {
+        func height(inPaneOf width: CGFloat) -> CGFloat {
+            let row = SettingsRow(symbol: "star", title: "Symbol", detail: "Any SF Symbol name.") {
+                // Stands in for the mode editor's name field, the widest control on any row.
+                Color.clear.frame(width: 200, height: 22)
+            }
+            .frame(width: width)
+
+            let host = NSHostingView(rootView: row)
+            host.sizingOptions = [.intrinsicContentSize]
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.height
+        }
+
+        let roomy = height(inPaneOf: 600)
+        let narrow = height(inPaneOf: 300)
+        // Stacking costs one control's height. Shredding cost eight lines of text.
+        #expect(narrow < roomy * 2)
+    }
+
     @Test("The menu bar content builds")
     func rendersMenuBar() {
         let (state, temp) = makeState()

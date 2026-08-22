@@ -276,6 +276,15 @@ has. Blank or black images mean that permission is missing — System Settings �
 Re-run it when a screen changes shape, and commit the PNGs. Light and dark are separate files;
 the README picks between them with `<picture>`.
 
+Two more environment variables, for looking at a screen rather than photographing it for the
+README. `OURWHISPER_SCREENSHOT_SIZE=880x560` poses the window at a given size — layouts break at
+the small end, and the small end is the one nobody drags a window to. `OURWHISPER_SCREENSHOT_SIDEBAR=collapsed`
+hides the sidebar, which is how the screens with a list of their own look when that list becomes
+the leftmost thing in the window. The sidebar is set either way rather than left alone, because
+AppKit autosaves whether it is collapsed into the app's defaults — which a debug build shares with
+the installed one, so whoever collapsed it in the real app would otherwise get README screenshots
+with no sidebar in them.
+
 ### The app icon
 
 `./scripts/make-icon.swift` draws `Sources/Resources/Assets.xcassets` with CoreGraphics. The PNGs
