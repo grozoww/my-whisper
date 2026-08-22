@@ -78,18 +78,7 @@ enum SelfTest {
 
         try file.read(into: input)
 
-        var consumed = false
-        var error: NSError?
-        converter.convert(to: output, error: &error) { _, status in
-            if consumed {
-                status.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            status.pointee = .haveData
-            return input
-        }
-        if let error { throw error }
+        try converter.convertOnce(input, into: output)
 
         guard let channel = output.floatChannelData?[0] else { return [] }
         return Array(UnsafeBufferPointer(start: channel, count: Int(output.frameLength)))

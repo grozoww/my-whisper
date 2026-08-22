@@ -1,0 +1,10 @@
+{
+  "swift.disableAutoResolve": true,
+  "files.exclude": {
+    "**/.DS_Store": true,
+    "build": true
+  },
+  "search.exclude": {
+    "build": true
+  }
+}

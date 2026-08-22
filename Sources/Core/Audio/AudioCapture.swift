@@ -126,22 +126,13 @@ final class AudioCapture: @unchecked Sendable {
         let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio) + 1024
         guard let output = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: capacity) else { return }
 
-        // The converter pulls input through this block. Handing it the same buffer twice would
-        // duplicate audio, so the flag makes the second call report "nothing more".
-        var consumed = false
-        var conversionError: NSError?
-        converter.convert(to: output, error: &conversionError) { _, status in
-            if consumed {
-                status.pointee = .noDataNow
-                return nil
-            }
-            consumed = true
-            status.pointee = .haveData
-            return buffer
+        do {
+            try converter.convertOnce(buffer, into: output)
+        } catch {
+            return
         }
 
-        guard conversionError == nil, output.frameLength > 0,
-              let channel = output.floatChannelData?[0] else { return }
+        guard output.frameLength > 0, let channel = output.floatChannelData?[0] else { return }
 
         let count = Int(output.frameLength)
 

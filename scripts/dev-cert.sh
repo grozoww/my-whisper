@@ -4,11 +4,11 @@
 #
 # Why: macOS ties Accessibility permission to an app's code signature. Xcode's default ad-hoc
 # signing produces a different signature on every build, so macOS treats each rebuild as a new
-# app and silently drops the permission — dictation stops with no error. A stable self-signed
-# identity fixes that: you grant Accessibility once and it survives rebuilds.
+# app and silently drops the permission — dictation stops with no error at all. A stable
+# self-signed identity fixes that: grant Accessibility once and it survives rebuilds.
 #
 # The certificate never leaves this machine and is not used for distribution.
-# No sudo required. You will be asked for your login password by macOS itself.
+# No sudo, and no password prompt.
 
 set -euo pipefail
 
@@ -16,10 +16,12 @@ CERT_NAME="OurWhisper Dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 VALID_DAYS=3650
 
-if security find-identity -v -p codesigning | grep -q "$CERT_NAME"; then
+# `find-identity -v` lists only *trusted* identities and this certificate is deliberately not
+# trusted as a root, so it would never appear there. Without -v lists all matches, which is what
+# codesign actually resolves against.
+if security find-identity -p codesigning | grep -q "$CERT_NAME"; then
   echo "✓ '$CERT_NAME' already exists. Nothing to do."
-  echo
-  security find-identity -v -p codesigning | grep "$CERT_NAME"
+  security find-identity -p codesigning | grep "$CERT_NAME"
   exit 0
 fi
 
@@ -43,38 +45,39 @@ keyUsage             = critical,digitalSignature
 extendedKeyUsage     = critical,codeSigning
 OPENSSL_CFG
 
-openssl req -x509 -newkey rsa:2048 -nodes \
+# /usr/bin/openssl explicitly, never whatever is first on PATH. A Homebrew OpenSSL 3 is common
+# and its defaults differ from what Apple's Security framework accepts.
+/usr/bin/openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout "$WORK/key.pem" -out "$WORK/cert.pem" \
   -days "$VALID_DAYS" -config "$WORK/cert.cnf" 2>/dev/null
 
-openssl pkcs12 -export \
-  -inkey "$WORK/key.pem" -in "$WORK/cert.pem" \
-  -out "$WORK/cert.p12" -passout pass: 2>/dev/null
-
 echo "Importing into your login keychain..."
-security import "$WORK/cert.p12" -k "$KEYCHAIN" -P "" \
-  -T /usr/bin/codesign -T /usr/bin/security >/dev/null
 
-echo
-echo "macOS will now ask for your login password — twice."
-echo "  1. to trust this certificate for code signing"
-echo "  2. to let codesign use its key without prompting on every build"
-echo
+# The key and the certificate are imported as separate PEM files rather than bundled into a
+# PKCS12. Going through PKCS12 is the usual recipe and it fails here: OpenSSL 3 writes p12
+# containers with modern crypto that macOS rejects with the thoroughly misleading
+# "MAC verification failed during PKCS12 import (wrong password?)".
+#
+# -A lets any application use this key without asking. That is what keeps the whole script
+# prompt-free. It is a throwaway local certificate whose only power is signing your own debug
+# builds, so the trade is worth it — do not use -A for a real Developer ID key.
+security import "$WORK/key.pem"  -k "$KEYCHAIN" -A >/dev/null
+security import "$WORK/cert.pem" -k "$KEYCHAIN" -A >/dev/null
 
-security add-trusted-cert -r trustRoot -p codeSign -k "$KEYCHAIN" "$WORK/cert.pem"
-security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN" >/dev/null 2>&1 || \
-  security set-key-partition-list -S apple-tool:,apple:,codesign: -s "$KEYCHAIN" >/dev/null
-
-echo
-if security find-identity -v -p codesigning | grep -q "$CERT_NAME"; then
-  echo "✓ Done. '$CERT_NAME' is ready."
-  security find-identity -v -p codesigning | grep "$CERT_NAME"
+if security find-identity -p codesigning | grep -q "$CERT_NAME"; then
   echo
-  echo "Xcode should pick it up automatically. If it does not, set it manually:"
+  echo "✓ Done. '$CERT_NAME' is ready."
+  security find-identity -p codesigning | grep "$CERT_NAME"
+  echo
+  echo "The CSSMERR_TP_NOT_TRUSTED note is expected and harmless. The certificate is not"
+  echo "installed as a trusted root — codesign does not require that to sign with it, and"
+  echo "leaving it untrusted avoids a password prompt and keeps your trust store clean."
+  echo
+  echo "Xcode should pick it up automatically. If it does not:"
   echo "  Target OurWhisper → Signing & Capabilities → Signing Certificate → $CERT_NAME"
 else
-  echo "✗ The certificate was created but is not showing as a valid signing identity."
-  echo "  Open Keychain Access, find '$CERT_NAME' under 'login', and set"
-  echo "  Trust → Code Signing to 'Always Trust'."
+  echo "✗ Import reported success but the identity is not visible to codesign."
+  echo "  Open Keychain Access, look for '$CERT_NAME' under 'login', and check that both the"
+  echo "  certificate and a matching private key are present."
   exit 1
 fi
