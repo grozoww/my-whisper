@@ -7,6 +7,15 @@ turn on the optional cloud provider. There is no account, no telemetry, and no p
 
 > Status: feature-complete and building from source. Not yet released — see [Roadmap](#roadmap).
 
+## Install it now
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/grozoww/my-whisper/main/scripts/install.sh | bash
+```
+
+Requires macOS 15 or later on Apple Silicon. What that script does, and how to install by hand
+instead, is under [Install](#install).
+
 ## Why another one
 
 Superwhisper and Wispr Flow are good and closed. This is the same idea, open, with the model
