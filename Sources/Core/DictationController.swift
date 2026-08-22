@@ -186,7 +186,7 @@ final class DictationController {
 
         let samples = capture.stop()
         phase = .transcribing
-        pill.pillModel.phase = .transcribing
+        pill.setPhase(.transcribing)
         playFeedback(settings.settings.sound.stopSound)
 
         Task { await transcribeAndInject(samples) }
@@ -228,7 +228,7 @@ final class DictationController {
                 && !mode.instructions.isEmpty
             if willUseModel {
                 phase = .formatting
-                pill.pillModel.phase = .formatting
+                pill.setPhase(.formatting)
             }
 
             let refined = await refinement.refine(
@@ -253,7 +253,7 @@ final class DictationController {
             )
 
             phase = .idle
-            pill.pillModel.phase = .success(injector.targetName ?? "Pasted")
+            pill.setPhase(.success(injector.targetName ?? "Pasted"))
             pill.dismiss(after: .milliseconds(700))
         } catch {
             log.error("Dictation failed: \(error.localizedDescription, privacy: .public)")
@@ -314,7 +314,7 @@ final class DictationController {
     private func showPill(_ phase: PillModel.Phase) {
         guard settings.settings.appearance.showPill else { return }
         pill.show()
-        pill.pillModel.phase = phase
+        pill.setPhase(phase)
     }
 
     private func playFeedback(_ sound: FeedbackSound) {
@@ -326,8 +326,10 @@ final class DictationController {
     private func notify(_ message: String) {
         phase = .failed(message)
         playFeedback(settings.settings.sound.errorSound)
-        pill.pillModel.phase = .failure(message)
+        // `show()` resets the model, so the phase has to be set after it — the other way round
+        // and the pill spends its 2.5 seconds showing audio bars instead of the error.
         pill.show()
+        pill.setPhase(.failure(message))
         pill.dismiss(after: .seconds(2.5))
         Task {
             try? await Task.sleep(for: .seconds(2.5))

@@ -72,6 +72,45 @@ jobs:
             exit 1
           fi
 
+  # The Release build is not the Debug build: it signs, it hardens the runtime, it compiles the
+  # asset catalog, and it is arm64-only. Every one of those has broken on its own without the
+  # Debug build noticing. Packaging on a pull request catches it before main, where release.yml
+  # publishes straight to a download page.
+  #
+  # Pull requests only. A push to main goes through release.yml, which packages the same way and
+  # publishes the result — running both would build the same DMG twice.
+  package:
+    name: Package a DMG
+    runs-on: macos-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # --unsigned needs no certificate and no secrets, so this runs on a fork's pull request
+      # exactly as it does on ours.
+      - name: Build the DMG
+        run: ./scripts/package.sh --unsigned
+
+      - name: Check the disk image mounts and holds the app
+        run: |
+          MOUNT="$(hdiutil attach dist/*.dmg -nobrowse -readonly -mountrandom /tmp \
+            | grep -o '/tmp/[^[:space:]]*$' | tail -1)"
+          test -d "$MOUNT/OurWhisper.app" || { echo "::error::No OurWhisper.app in the DMG."; exit 1; }
+          # An app icon that failed to compile is invisible until someone looks in the Dock.
+          test -f "$MOUNT/OurWhisper.app/Contents/Resources/AppIcon.icns" \
+            || { echo "::error::The app icon is missing. Run ./scripts/make-icon.swift."; exit 1; }
+          codesign --verify --strict --verbose=2 "$MOUNT/OurWhisper.app"
+          hdiutil detach "$MOUNT" -quiet
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OurWhisper-dmg
+          path: |
+            dist/*.dmg
+            dist/SHA256SUMS
+          retention-days: 14
+
   audit:
     name: Dependency audit
     runs-on: macos-latest

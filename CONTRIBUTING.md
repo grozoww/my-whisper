@@ -187,10 +187,45 @@ account and these four values in the environment: `SIGNING_IDENTITY`, `APPLE_TEA
 `NOTARY_APPLE_ID`, `NOTARY_PASSWORD`. Notarization uploads the DMG to Apple and waits a few
 minutes.
 
-To publish: push a tag (`git tag v0.2.0 && git push --tags`). `.github/workflows/release.yml`
-picks the notarized path when the signing secrets are set and the unsigned path when they are not,
-marking unsigned builds as pre-releases. Running the workflow by hand from the Actions tab also
-works, and has an "unsigned" checkbox for rehearsing the whole thing.
+### Where builds come from
+
+| Trigger | What it produces |
+| --- | --- |
+| Pull request | A DMG as a CI artifact. Nothing published. |
+| Push to `main` | A rolling prerelease tagged `latest`, replaced each time. |
+| Push a tag `v*` | A versioned release. Notarized if the signing secrets are set. |
+| Actions → Run workflow | A one-off `build-<n>` release, with an "unsigned" checkbox for rehearsing. |
+
+`.github/workflows/release.yml` picks the notarized path when the signing secrets are set and the
+unsigned path when they are not. Anything that is not a notarized tag is marked a prerelease, so
+GitHub keeps pointing people at the newest real release. The rolling release is deleted and
+recreated on each push rather than added to — reusing the tag would otherwise leave two DMGs
+attached to it once the version number changes, and `install.sh` takes the first one it finds.
+
+The DMG job in `ci.yml` exists because the Release build is not the Debug build: it signs, it
+hardens the runtime, it compiles the asset catalog and it is arm64-only. Each of those has broken
+without the Debug build noticing.
+
+### Installing
+
+`scripts/install.sh` is the `curl | bash` in the README. It finds the newest release carrying a
+DMG — deliberately not `/releases/latest`, which skips prereleases and would therefore find
+nothing at all until this project is notarized — then copies the app into `/Applications` and
+clears `com.apple.quarantine`. That last step is the point of the script. macOS refuses to open an
+unnotarized download at all, claiming the app is damaged, and talking every user through
+`xattr -dr` by hand is not a distribution strategy.
+
+Keep it dependency-free. It has to run on a stock Mac, which means no `jq`, and Python cannot be
+assumed either. It parses the GitHub API with `grep`, and it is short enough to read before
+running, which is the only reason anyone should be willing to pipe it into a shell.
+
+### The app icon
+
+`./scripts/make-icon.swift` draws `Sources/Resources/Assets.xcassets` with CoreGraphics. The PNGs
+it writes are committed, so a clone builds without running it; re-run it only when changing the
+icon. Each size is drawn at its own scale rather than downsampled from 1024, because a stroke that
+reads well at 512 turns to mush when squeezed into 16 pixels. `--icns` also writes
+`dist/OurWhisper.icns` for anything outside the app bundle.
 
 Release builds are **arm64 only**, set on the `xcodebuild` command line rather than only in the
 project — Swift package targets live in a generated project of their own and do not inherit
@@ -199,9 +234,9 @@ a machine this app cannot run on anyway.
 
 ## Pull requests
 
-CI builds every PR on a macOS runner with `CODE_SIGNING_ALLOWED=NO` and no secrets available. The
-release workflow is separate, tag-triggered and main-repo only, so a fork PR can never reach the
-signing certificate.
+CI builds and tests every PR on a macOS runner with `CODE_SIGNING_ALLOWED=NO`, and packages a DMG
+with `--unsigned`. Neither needs a secret, so a fork's PR runs exactly as ours does. The release
+workflow is separate and main-repo only, so a fork PR can never reach the signing certificate.
 
 The Xcode project uses **synchronized file groups**: a new file under `Sources/` joins the target
 automatically, so you never edit `project.pbxproj` and PRs do not conflict in it.

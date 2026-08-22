@@ -3,6 +3,14 @@ import SwiftUI
 struct PillView: View {
     @Environment(PillModel.self) private var model
 
+    /// Transparent margin left around the capsule for the shadow to fall into.
+    ///
+    /// The window is sized to this view, and the window server clips to the window frame. Without
+    /// the margin the blur is cut off square and the pill sits inside a visible grey rectangle —
+    /// which reads as a bug in the pill, not as a missing pixel of shadow. Must cover the blur
+    /// radius plus the downward offset.
+    static let shadowMargin: CGFloat = 24
+
     var body: some View {
         HStack(spacing: 10) {
             content
@@ -19,6 +27,7 @@ struct PillView: View {
                 }
         }
         .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
+        .padding(Self.shadowMargin)
         .animation(.smooth(duration: 0.18), value: model.phase)
     }
 

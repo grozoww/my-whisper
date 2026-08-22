@@ -1,0 +1,49 @@
+import AppKit
+import ServiceManagement
+import Testing
+
+@testable import OurWhisper
+
+/// How the app presents itself to macOS, rather than what it does with a recording.
+///
+/// Both of the things covered here fail silently. A missing app icon compiles, links, packages and
+/// installs, and is only noticed by whoever looks in the Dock. A login item that cannot register
+/// says nothing at all — the app simply does not come back after a restart.
+@Suite("App bundle")
+struct AppBundleTests {
+    /// The tests run against the app as their host, so `Bundle.main` is the real app bundle. That
+    /// is what makes this checkable at all: it is the shipped bundle being inspected, not a
+    /// fixture.
+    @Test("The app bundle carries an icon")
+    func hasAppIcon() {
+        #expect(Bundle.main.object(forInfoDictionaryKey: "CFBundleIconName") as? String == "AppIcon")
+        // Present in the compiled asset catalog, not merely named in Info.plist. Deleting
+        // Sources/Resources/Assets.xcassets leaves the key behind and the icon gone.
+        #expect(NSImage(named: "AppIcon") != nil)
+    }
+
+    @Test("Every login-item state explains itself", arguments: [
+        SMAppService.Status.enabled,
+        .requiresApproval,
+        .notFound,
+        .notRegistered,
+    ])
+    func loginItemStatesExplainThemselves(status: SMAppService.Status) {
+        let explanation = LaunchAtLogin.explanation(for: status)
+        #expect(!explanation.isEmpty)
+        // CLAUDE.md's rule for user-facing strings: say what to do about it. A status code echoed
+        // back at the user is the failure this guards against.
+        #expect(!explanation.contains("requiresApproval"))
+        #expect(!explanation.contains("notRegistered"))
+    }
+
+    /// Reads the live state. Never registers: the test host is a build in DerivedData, and
+    /// registering it would add a login item on the machine running the suite that points at a
+    /// directory Xcode will eventually delete.
+    @Test("Reading the login-item status is side-effect free")
+    func readingStatusDoesNotRegister() {
+        let before = LaunchAtLogin.status
+        #expect(LaunchAtLogin.isEnabled == (before == .enabled))
+        #expect(LaunchAtLogin.status == before)
+    }
+}

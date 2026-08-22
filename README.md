@@ -58,18 +58,28 @@ Online (optional, Soniox): 60+ including Chinese and Japanese. Requires your own
 
 ## Install
 
-Download the DMG from [Releases](https://github.com/grozoww/my-whisper/releases), open it, and
-drag OurWhisper to Applications.
+```bash
+curl -fsSL https://raw.githubusercontent.com/grozoww/my-whisper/main/scripts/install.sh | bash
+```
 
-Builds that are not notarized are marked as pre-releases. macOS refuses those on a plain
-double-click — **right-click the app in Applications and choose Open** instead, once. That warning
-means Apple has not vouched for the build, which costs $99 a year, not that anything is wrong with
-it. Every release says which kind it is.
+That fetches the newest build, copies OurWhisper to Applications and clears the download
+quarantine flag. The last step is not a convenience. These builds are **not notarized** — Apple
+charges $99 a year to vouch for a build, and this project does not pay it — and macOS refuses to
+open an unnotarized download at all, with a dialog claiming the app is damaged. It is not damaged;
+it is just not stamped. [`scripts/install.sh`](scripts/install.sh) is short and does nothing else,
+so read it before you run it.
+
+Prefer to do it by hand: download the DMG from
+[Releases](https://github.com/grozoww/my-whisper/releases), drag OurWhisper to Applications, then
+**right-click it and choose Open**, once. Every release says whether it is notarized. Pushes to
+`main` refresh a rolling `latest` prerelease, so there is always a current build to download; tags
+produce versioned releases.
 
 OurWhisper then asks for Microphone and Accessibility permission, and both are required: the
 microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.
 It is a menu bar app — look for the microphone icon in the menu bar, not the Dock. There is a
-"Show in the Dock" switch in Configuration if you would rather have one.
+"Show in the Dock" switch in Configuration if you would rather have one, and an "Open at login"
+switch next to it.
 
 Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 

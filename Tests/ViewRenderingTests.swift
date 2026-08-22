@@ -133,7 +133,43 @@ struct ViewRenderingTests {
     func rendersPillPhases(phase: PillModel.Phase) {
         let model = PillModel()
         model.phase = phase
-        render(PillView().environment(model), size: CGSize(width: 340, height: 60))
+        render(PillView().environment(model), size: CGSize(width: 400, height: 140))
+    }
+
+    /// The bug this guards against: the pill's window is sized to this view, and the window server
+    /// clips to the window frame. When the view was exactly the size of the capsule, the drop
+    /// shadow was cut off square and the pill appeared to sit inside a grey rectangle. The fix is
+    /// transparent padding, and the only way to tell it is still there is to measure.
+    @Test("The pill leaves room for its own shadow")
+    func pillReservesShadowMargin() {
+        let model = PillModel()
+        let host = NSHostingView(rootView: PillView().environment(model))
+        host.sizingOptions = [.intrinsicContentSize]
+        host.layoutSubtreeIfNeeded()
+
+        let capsule = CGSize(width: 108, height: 44)
+        let margin = PillView.shadowMargin
+        #expect(host.fittingSize.height >= capsule.height + margin * 2)
+        #expect(host.fittingSize.width >= capsule.width + margin * 2)
+    }
+
+    /// Why `PillWindowController.setPhase` has to re-fit the window rather than just assign the
+    /// phase: a window sized to its content view does not resize when that content changes, so a
+    /// phase that is wider than the one before it would be truncated and left off centre.
+    @Test("Phases do not all want the same width")
+    func pillPhasesDifferInWidth() {
+        func width(of phase: PillModel.Phase) -> CGFloat {
+            let model = PillModel()
+            model.phase = phase
+            let host = NSHostingView(rootView: PillView().environment(model))
+            host.sizingOptions = [.intrinsicContentSize]
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.width
+        }
+
+        let listening = width(of: .listening)
+        #expect(width(of: .transcribing) > listening)
+        #expect(width(of: .failure("Could not paste. The text is on your clipboard.")) > listening)
     }
 
     @Test("The menu bar content builds")

@@ -43,6 +43,8 @@ And one that follows from them:
 ./scripts/run.sh --logs          # stream the app's logs at info level
 ./scripts/run.sh --selftest speech.wav ru   # transcribe a file, no UI or permissions needed
 ./scripts/audit-deps.sh          # dependency pinning and vulnerability check
+./scripts/package.sh --unsigned  # build a distributable DMG, no Apple account needed
+./scripts/make-icon.swift        # redraw the app icon into Sources/Resources/Assets.xcassets
 
 OURWHISPER_SECTION=modes open -a OurWhisper   # open the window on a given screen
 ```
@@ -77,6 +79,7 @@ Sources/
     Transcription/  Provider protocol, Parakeet, Soniox, router
     Update/         Release check
     Vocabulary/     Substitution list
+  Resources/    Assets.xcassets — the app icon, drawn by scripts/make-icon.swift
   UI/           One directory per screen, plus DesignSystem
 Tests/          Swift Testing, no network, no key, no permissions
 ```
@@ -131,6 +134,25 @@ not apply to the other — while System Settings still shows a ticked OurWhisper
 "I granted it and the app still says I did not". The Home screen shows the running bundle path and
 warns when other builds exist; check that before suspecting the permission code.
 
+**A window sized to its content view does not resize when the content does.** The pill's phases
+are different widths — "Cleaning up" is wider than five audio bars — so setting `PillModel.phase`
+directly leaves the panel at the previous width and the longer label is truncated and off centre.
+Go through `PillWindowController.setPhase`, which re-fits and re-centres. `show()` also resets the
+model, so it must be called *before* the phase is set, not after.
+
+**A window clips its own contents, shadow included.** The pill's panel is sized to the SwiftUI
+view, and the window server clips to the window frame, so a `.shadow` with nowhere to fall is cut
+off square — the pill then appears to sit inside a translucent grey rectangle. `PillView` reserves
+`shadowMargin` of transparent padding for it, and `PillWindowController.reposition` subtracts that
+margin so the capsule stays where it was. Any floating overlay that draws its own shadow needs the
+same room.
+
+**Launch at login is not a setting.** `LaunchAtLogin` reads `SMAppService.mainApp.status` every
+time. Persisting it in `Settings` would create a second source of truth that drifts the moment
+someone switches the login item off in System Settings, and the toggle would then lie about what
+the Mac will actually do at the next login. Registration is also per bundle path, so a debug build
+registers the copy in DerivedData — the same trap as Accessibility permission, below.
+
 **`decodeIfPresent` cannot tell "absent" from "null".** For an optional field whose default is not
 nil — `pushToTalkChord` is the live example — use
 `container.optional(key, defaultWhenAbsent:)`, or upgrading users get nil instead of the new
@@ -152,6 +174,13 @@ dictation, including when the model is off. Anything needing judgement belongs i
 in the right screen. Never add a control without the sentence explaining it — `SettingsRow`
 requires a `detail` for that reason.
 
+**Anything users download.** `scripts/package.sh` builds the DMG and `scripts/install.sh` is the
+`curl | bash` that installs it. There is no Apple Developer account behind this project, so
+releases are ad-hoc signed rather than notarized and macOS refuses to open them until the
+quarantine flag is cleared — which is the one thing install.sh exists to do. A pull request builds
+the DMG in CI; a push to main publishes it to a rolling `latest` prerelease; a tag cuts a versioned
+release.
+
 **A dependency.** It must be pinned to an exact version, `Package.resolved` must be committed in
 the same change, and `./scripts/audit-deps.sh` must pass. Two traps found the hard way, both
 recorded in `CONTRIBUTING.md`: a package with a build-tool plugin needs Xcode's plugin trust, and
@@ -159,7 +188,7 @@ anything depending on `mlx-swift` 0.31.5+ needs Xcode's separately-downloaded Me
 
 ## Testing
 
-Swift Testing, not XCTest. 94 tests, no network, no API key, no microphone, no permissions.
+Swift Testing, not XCTest. 107 tests, no network, no API key, no microphone, no permissions.
 
 - Cloud providers are tested against `StubHTTPClient` with recorded response shapes.
 - Every screen is built and laid out in `ViewRenderingTests` — a view that crashes on

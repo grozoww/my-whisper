@@ -1,3 +1,4 @@
+import ServiceManagement
 import SwiftUI
 
 /// Everything that is not a mode, a word, a sound or a transcript.
@@ -167,6 +168,8 @@ struct ConfigurationView: View {
                 }
             }
 
+            StartupSection()
+
             SettingsSection(title: "Appearance") {
                 SettingsRow(symbol: "circle.lefthalf.filled", title: "Theme") {
                     Picker("Theme", selection: $settings.settings.appearance.theme) {
@@ -244,6 +247,53 @@ struct ConfigurationView: View {
         return appState.settings.settings.dictation.allowCloudFallback
             ? "Not covered offline — this language goes to Soniox."
             : "Not covered offline. Turn on the cloud switch below, or this language will refuse to transcribe."
+    }
+}
+
+// MARK: - Startup
+
+/// The login-item toggle.
+///
+/// Holds its own `@State` because the truth lives in `SMAppService`, not in `Settings`, and a
+/// plain computed binding would leave the switch showing the old value after a failed register.
+/// Re-read on appear so a change made in System Settings shows up here.
+private struct StartupSection: View {
+    @State private var isEnabled = false
+    @State private var status = LaunchAtLogin.status
+
+    var body: some View {
+        SettingsSection(title: "Startup") {
+            SettingsRow(
+                symbol: "power",
+                title: "Open at login",
+                detail: LaunchAtLogin.explanation,
+                tint: isEnabled ? .green : .secondary
+            ) {
+                HStack(spacing: 8) {
+                    if status == .requiresApproval {
+                        Button("Open Login Items") { LaunchAtLogin.openLoginItemsSettings() }
+                            .buttonStyle(.bordered)
+                    }
+                    Toggle("", isOn: $isEnabled)
+                        .toggleStyle(.switch)
+                        .disabled(status == .requiresApproval || status == .notFound)
+                }
+            }
+        }
+        .onAppear(perform: refresh)
+        .onChange(of: isEnabled) { _, wanted in
+            // A refused registration must not leave the switch showing a state macOS disagrees
+            // with, so the answer always comes back from the system.
+            LaunchAtLogin.set(wanted)
+            refresh()
+        }
+    }
+
+    private func refresh() {
+        status = LaunchAtLogin.status
+        let enabled = LaunchAtLogin.isEnabled
+        // Guarded, or writing the value we just read would re-enter `onChange` and register again.
+        if isEnabled != enabled { isEnabled = enabled }
     }
 }
 
