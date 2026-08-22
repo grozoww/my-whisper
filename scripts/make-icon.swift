@@ -3,6 +3,7 @@
 // Draws the app icon and writes the asset catalog.
 //
 //   ./scripts/make-icon.swift            regenerate Sources/Resources/Assets.xcassets
+//                                        and docs/images/icon.png, which the README opens with
 //   ./scripts/make-icon.swift --icns     also write dist/OurWhisper.icns
 //
 // The icon is code rather than a checked-in design file for one reason: there is no designer on
@@ -343,6 +344,15 @@ try! catalogContents.write(
 )
 
 print("✓ Sources/Resources/Assets.xcassets/AppIcon.appiconset")
+
+// MARK: - README
+
+// The README opens with the icon, and that copy used to be made by hand — which is how it ended up
+// a redesign behind the app. Writing it here is the only thing that keeps the two in step.
+private let docsImages = root.appendingPathComponent("docs/images")
+try! FileManager.default.createDirectory(at: docsImages, withIntermediateDirectories: true)
+writePNG(render(pixels: 512), to: docsImages.appendingPathComponent("icon.png"))
+print("✓ docs/images/icon.png")
 
 // MARK: - Optional .icns
 
