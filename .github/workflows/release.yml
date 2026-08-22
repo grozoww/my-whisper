@@ -38,7 +38,21 @@ jobs:
     if: github.repository == 'grozoww/my-whisper'
 
     steps:
+      # Full history, not the single commit `actions/checkout` clones by default. scripts/version.sh
+      # derives the patch number from the pull requests merged since the version line was set, and
+      # a shallow clone has no merges in it to count — every build would come out as x.y.0.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # VERSION, BUILD, SHA and RELEASE_NAME, for the steps below and for the release name. The
+      # same script package.sh uses, so what the release is called and what the app reports are
+      # worked out once rather than twice.
+      - name: Work out the version
+        run: ./scripts/version.sh >> "$GITHUB_ENV"
+
+      - name: Announce it
+        run: echo "::notice::$RELEASE_NAME (build $BUILD)"
 
       # Secrets are not available in a job-level `if:`, so which path to take is worked out here
       # and read from `env` by the steps below.
@@ -98,7 +112,11 @@ jobs:
       # package.sh writes the wording; this puts it where the person downloading will see it.
       - name: Assemble release notes
         run: |
-          : > release-notes.md
+          # Which commit a download came from is the first thing anyone asks when a build
+          # misbehaves, and the release name is the only place it would otherwise appear.
+          printf 'Version **%s** (build %s) from [`%s`](%s/commit/%s).\n\n' \
+            "$VERSION" "$BUILD" "$SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA" \
+            > release-notes.md
           if [ "${{ github.ref_type }}" != "tag" ]; then
             cat >> release-notes.md <<'ROLLING'
           > **Rolling build.** Rebuilt from `main` on every push, so this tag moves and its
@@ -136,7 +154,11 @@ jobs:
           # stay a single release rather than accumulating one per commit. workflow_dispatch gets a
           # run number, so a rehearsal collides with neither.
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && env.ROLLING_TAG || format('build-{0}', github.run_number)) }}
-          name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && format('Rolling build ({0})', github.run_number) || format('build-{0}', github.run_number)) }}
+          # release-1.0.3-a1b2c3d, whatever the trigger — the version and the commit are what
+          # anyone reading the list actually wants, and the tag above already says which kind of
+          # build it is. A manual run adds its run number, because two rehearsals of the same
+          # commit would otherwise be two releases with identical names.
+          name: ${{ github.event_name == 'workflow_dispatch' && format('{0} (build {1})', env.RELEASE_NAME, github.run_number) || env.RELEASE_NAME }}
           target_commitish: ${{ github.sha }}
           # Anything that is not a notarized tag is a prerelease, so GitHub keeps pointing people
           # at the newest real release rather than at whatever main happens to contain today.

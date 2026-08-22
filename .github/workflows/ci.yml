@@ -85,12 +85,22 @@ jobs:
     if: github.event_name == 'pull_request'
 
     steps:
+      # Full history: scripts/version.sh counts merged pull requests to get the patch number, and
+      # a shallow clone has none to count. Getting it wrong here only mislabels a PR artifact, but
+      # it would mislabel it differently from the release the same commit later produces.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # --unsigned needs no certificate and no secrets, so this runs on a fork's pull request
       # exactly as it does on ours.
       - name: Build the DMG
         run: ./scripts/package.sh --unsigned
+
+      # The version is derived, not typed, so it is worth seeing what it came out as before the
+      # same commit reaches main and publishes under that number.
+      - name: Show what this build is called
+        run: echo "::notice::$(./scripts/version.sh --name)"
 
       - name: Check the disk image mounts and holds the app
         run: |

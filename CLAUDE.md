@@ -36,6 +36,7 @@ And one that follows from them:
 ## Commands
 
 ```bash
+./scripts/version.sh             # what this build is called, and why
 ./scripts/run.sh                 # build and relaunch
 ./scripts/run.sh --build         # build only
 ./scripts/run.sh --test          # unit tests
@@ -161,6 +162,16 @@ off square — the pill then appears to sit inside a translucent grey rectangle.
 margin so the capsule stays where it was. Any floating overlay that draws its own shadow needs the
 same room.
 
+**The version number is derived, so it needs real history.** `scripts/version.sh` sets the patch
+number from the pull requests merged since the `VERSION` file last changed, which means a shallow
+clone — `actions/checkout`'s default — has no merges to count and every build comes out as x.y.0.
+Both workflows pass `fetch-depth: 0` for that reason. Major and minor stay a hand edit to
+`VERSION`; a `v*` tag on the built commit overrides the lot. `package.sh` stamps the result onto
+`xcodebuild`, so `MARKETING_VERSION` in the project is only what a plain Xcode build falls back to
+— keep it equal to `VERSION`, but do not treat it as the source of truth. Getting this wrong ships
+an app that reports an older version than the release it came from, and `UpdateChecker` then
+offers every user an update to what they are already running.
+
 **Launch at login is not a setting.** `LaunchAtLogin` reads `SMAppService.mainApp.status` every
 time. Persisting it in `Settings` would create a second source of truth that drifts the moment
 someone switches the login item off in System Settings, and the toggle would then lie about what
@@ -193,7 +204,7 @@ requires a `detail` for that reason.
 releases are ad-hoc signed rather than notarized and macOS refuses to open them until the
 quarantine flag is cleared — which is the one thing install.sh exists to do. A pull request builds
 the DMG in CI; a push to main publishes it to a rolling `latest` prerelease; a tag cuts a versioned
-release.
+release. Every one of them is named `release-<version>-<short sha>`.
 
 **A dependency.** It must be pinned to an exact version, `Package.resolved` must be committed in
 the same change, and `./scripts/audit-deps.sh` must pass. Two traps found the hard way, both

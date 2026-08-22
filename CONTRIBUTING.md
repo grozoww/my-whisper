@@ -174,8 +174,7 @@ that code runs on the audio thread, where "probably fine" becomes a dropout.
 ./scripts/package.sh               # signed and notarized, needs the environment below
 ```
 
-Both produce `dist/OurWhisper-<version>.dmg` with the app and an Applications symlink inside. The
-version comes from `MARKETING_VERSION` in the project, which is the single source of truth.
+Both produce `dist/OurWhisper-<version>.dmg` with the app and an Applications symlink inside.
 
 **Unsigned** is ad-hoc signed: a real signature with no certificate behind it. The DMG works, but
 Gatekeeper blocks the first double-click because Apple has not vouched for it, and the user has to
@@ -188,14 +187,55 @@ account and these four values in the environment: `SIGNING_IDENTITY`, `APPLE_TEA
 `NOTARY_APPLE_ID`, `NOTARY_PASSWORD`. Notarization uploads the DMG to Apple and waits a few
 minutes.
 
+### Version numbers
+
+Nobody types the patch number. `scripts/version.sh` works out what a build is called, and both
+`package.sh` and the release workflow ask it rather than deciding for themselves — so the DMG
+filename, the version baked into the app and the name on the release page cannot drift apart.
+
+The `VERSION` file at the repository root holds the line you are on. **Major and minor are yours**:
+edit the file when a release deserves the number. **The patch is counted**: it is the number of
+pull requests merged since `VERSION` last changed.
+
+```
+VERSION says 1.0.0, nothing merged since   →  1.0.0
+four PRs merged since                      →  1.0.4
+edit VERSION to 1.1.0                      →  1.1.0, counting starts again
+```
+
+PRs are counted along main's first-parent chain, so only what landed counts, once each, and both
+merge styles are recognised — `Merge pull request #12` and a squashed `Some change (#12)`. A commit
+pushed straight to main is not a PR and does not move the number.
+
+A `v*` tag on the exact commit being built overrides all of it. Tagging `v1.2.0` is a decision, and
+a release whose tag and whose app disagree tells every user to upgrade to what they are already
+running — `UpdateChecker` compares the release tag against `CFBundleShortVersionString`.
+
+`MARKETING_VERSION` in the project is kept equal to the `VERSION` file so a plain Xcode build is
+not wrong, but it is not what a release uses; `package.sh` passes the computed value on the
+`xcodebuild` command line. `CURRENT_PROJECT_VERSION` gets every PR ever merged, plus one — a
+build number has to keep rising when the marketing version resets.
+
+```bash
+./scripts/version.sh            # VERSION=… BUILD=… SHA=… RELEASE_NAME=…
+./scripts/version.sh --name     # release-1.0.3-a1b2c3d
+```
+
+This needs real history. `actions/checkout` clones a single commit by default, which has no merges
+in it to count, so both workflows pass `fetch-depth: 0`.
+
 ### Where builds come from
 
-| Trigger | What it produces |
-| --- | --- |
-| Pull request | A DMG as a CI artifact. Nothing published. |
-| Push to `main` | A rolling prerelease tagged `latest`, replaced each time. |
-| Push a tag `v*` | A versioned release. Notarized if the signing secrets are set. |
-| Actions → Run workflow | A one-off `build-<n>` release, with an "unsigned" checkbox for rehearsing. |
+Releases are named `release-<version>-<short sha>` — `release-1.0.3-a1b2c3d` — whatever the
+trigger. The tag says what kind of build it is; the name says which code is in it, which is the
+first thing anyone asks when a download misbehaves.
+
+| Trigger | Tag | Name |
+| --- | --- | --- |
+| Pull request | — | A DMG as a CI artifact. Nothing published. |
+| Push to `main` | `latest`, a rolling prerelease replaced each time | `release-1.0.3-a1b2c3d` |
+| Push a tag `v*` | the tag. Notarized if the signing secrets are set | `release-1.0.3-a1b2c3d` |
+| Actions → Run workflow | `build-<n>`, with an "unsigned" checkbox for rehearsing | `release-1.0.3-a1b2c3d (build 7)` |
 
 `.github/workflows/release.yml` picks the notarized path when the signing secrets are set and the
 unsigned path when they are not. Anything that is not a notarized tag is marked a prerelease, so
