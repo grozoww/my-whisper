@@ -13,6 +13,10 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
+# Editor / LSP: contains absolute machine-specific paths, regenerate with
+#   xcode-build-server config -project OurWhisper.xcodeproj -scheme OurWhisper
+buildServer.json
+
 # Swift Package Manager
 .build/
 .swiftpm/

@@ -1,0 +1,57 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build",
+      "type": "shell",
+      "command": "./scripts/run.sh --build",
+      "group": { "kind": "build", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "problemMatcher": {
+        "owner": "swift",
+        "fileLocation": ["absolute"],
+        "pattern": {
+          "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+          "file": 1, "line": 2, "column": 3, "severity": 4, "message": 5
+        }
+      }
+    },
+    {
+      "label": "Build and Run",
+      "type": "shell",
+      "command": "./scripts/run.sh",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Stream logs",
+      "type": "shell",
+      "command": "./scripts/run.sh --logs",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Self-test: transcribe a file",
+      "type": "shell",
+      "command": "./scripts/run.sh --selftest '${input:audioFile}' '${input:languageCode}'",
+      "presentation": { "reveal": "always", "panel": "shared", "clear": true },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "audioFile",
+      "type": "promptString",
+      "description": "Path to an audio file to transcribe",
+      "default": "speech.wav"
+    },
+    {
+      "id": "languageCode",
+      "type": "promptString",
+      "description": "Language code (auto, en, ru, uk, es, de, fr, pl)",
+      "default": "auto"
+    }
+  ]
+}

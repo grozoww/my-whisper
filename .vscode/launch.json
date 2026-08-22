@@ -1,0 +1,48 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Breakpoints and stepping without Xcode.
+      //
+      // The program path goes through build/OurWhisper.app, a symlink that scripts/run.sh
+      // maintains. Xcode's real DerivedData path contains a machine-specific hash, so it cannot
+      // be written down here directly.
+      //
+      // The app is an LSUIElement accessory: it appears in the menu bar, never the Dock.
+      "type": "lldb-dap",
+      "request": "launch",
+      "name": "Debug OurWhisper",
+      "program": "${workspaceFolder}/build/OurWhisper.app/Contents/MacOS/OurWhisper",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "Build"
+    },
+    {
+      // Same, but transcribes a file on launch instead of waiting for the hotkey. Useful when
+      // Accessibility permission is not granted, since the hotkey cannot work without it.
+      "type": "lldb-dap",
+      "request": "launch",
+      "name": "Debug OurWhisper (self-test)",
+      "program": "${workspaceFolder}/build/OurWhisper.app/Contents/MacOS/OurWhisper",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "OURWHISPER_SELFTEST": "${input:audioFile}",
+        "OURWHISPER_SELFTEST_LANGUAGE": "${input:languageCode}"
+      },
+      "preLaunchTask": "Build"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "audioFile",
+      "type": "promptString",
+      "description": "Path to an audio file to transcribe",
+      "default": "speech.wav"
+    },
+    {
+      "id": "languageCode",
+      "type": "promptString",
+      "description": "Language code (auto, en, ru, uk, es, de, fr, pl)",
+      "default": "auto"
+    }
+  ]
+}

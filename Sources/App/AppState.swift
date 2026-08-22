@@ -37,12 +37,33 @@ final class AppState {
     var recordingState: RecordingState = .idle
     var selectedSection: NavigationSection = .home
     let permissions = PermissionsManager()
+    let dictation = DictationController()
 
-    /// Name of the input device shown in the toolbar. Wired to real device enumeration in P1.
+    /// Name of the input device shown in the toolbar. Real device enumeration lands in P4's
+    /// Sound settings; until then this is the system default.
     var inputDeviceName: String = "Default input"
+
+    private var accessibilityWatcher: Task<Void, Never>?
 
     func start() async {
         permissions.refresh()
         permissions.beginMonitoring()
+        dictation.start()
+        watchAccessibility()
+    }
+
+    /// The hotkey tap cannot be installed until Accessibility is granted, and the user usually
+    /// grants it minutes after launch. Without this the app would need a restart to work.
+    private func watchAccessibility() {
+        guard accessibilityWatcher == nil else { return }
+        accessibilityWatcher = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                if self.permissions.accessibility.isGranted, !self.dictation.hotkeyArmed {
+                    self.dictation.armHotkeys()
+                }
+            }
+        }
     }
 }
