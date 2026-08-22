@@ -23,12 +23,16 @@ final class RefinementPipeline {
         self.onDevice = onDevice
     }
 
+    /// `clipboard` is what the user had copied when they started speaking, or nil when nothing
+    /// read it. Whether it is used at all is the mode's decision, made here so there is one place
+    /// to look for the answer to "why did the model see my clipboard".
     func refine(
         _ raw: String,
         mode: Mode,
         settings: RefinementSettings,
         vocabulary: [VocabularyEntry],
-        language: SpeechLanguage
+        language: SpeechLanguage,
+        clipboard: String? = nil
     ) async -> Result {
         guard settings.isEnabled else { return Result(text: raw, usedModel: false) }
 
@@ -42,6 +46,7 @@ final class RefinementPipeline {
         let refined = await onDevice.refine(
             cleaned,
             instructions: mode.instructions,
+            context: mode.usesClipboardContext ? clipboard : nil,
             timeout: .seconds(max(1, settings.modelTimeoutSeconds))
         )
 

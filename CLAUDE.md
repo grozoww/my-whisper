@@ -114,6 +114,14 @@ fast and do not add work to them.
 `frontmostApplication` change underneath, and the text lands in the wrong app.
 `DictationController.beginRecording` gets this order right — do not reorder it.
 
+**The clipboard has to be read before the paste, not after.** `TextInjector` pastes through the
+clipboard, so by the time cleanup runs the user's clipboard is already the dictated text.
+`DictationController.beginRecording` reads it alongside the paste target, for the same reason, and
+it only reads it at all when some mode has "Use the clipboard as context" on — that condition is
+what lets the README say the clipboard is otherwise only touched to paste. `ClipboardContext` is
+the single place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`,
+which is what a password manager sets on a copied password.
+
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
 
@@ -194,7 +202,7 @@ anything depending on `mlx-swift` 0.31.5+ needs Xcode's separately-downloaded Me
 
 ## Testing
 
-Swift Testing, not XCTest. 107 tests, no network, no API key, no microphone, no permissions.
+Swift Testing, not XCTest. 117 tests, no network, no API key, no microphone, no permissions.
 
 - Cloud providers are tested against `StubHTTPClient` with recorded response shapes.
 - Every screen is built and laid out in `ViewRenderingTests` — a view that crashes on

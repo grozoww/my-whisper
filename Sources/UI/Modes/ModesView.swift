@@ -154,6 +154,15 @@ private struct ModeEditor: View {
                     .frame(minHeight: 130)
                     .padding(10)
                     .scrollContentBackground(.hidden)
+
+                RowDivider()
+
+                toggle(
+                    "Use the clipboard as context",
+                    "Shows the model what you have copied, so it spells the names and terms in it the same way. It is never pasted, it never leaves the Mac, and a password copied from a password manager is skipped.",
+                    "doc.on.clipboard",
+                    $draft.usesClipboardContext
+                )
             }
 
             SettingsSection(
