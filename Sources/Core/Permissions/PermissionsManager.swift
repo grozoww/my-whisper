@@ -65,6 +65,14 @@ final class PermissionsManager {
             }
     }
 
+    /// Screenshot mode only. `scripts/screenshots.sh` builds a bundle that has been granted
+    /// nothing, and a README picture of the first-launch checklist says nothing about what the app
+    /// does. Nothing else calls this, and it never touches what macOS actually believes.
+    func poseAsGranted() {
+        microphone = .granted
+        accessibility = .granted
+    }
+
     private static func microphoneStatus() -> Status {
         switch AVCaptureDevice.authorizationStatus(for: .audio) {
         case .authorized: .granted

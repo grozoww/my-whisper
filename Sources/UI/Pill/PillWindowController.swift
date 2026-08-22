@@ -15,6 +15,9 @@ final class PillWindowController {
 
     var pillModel: PillModel { model }
 
+    /// What `screencapture -l` needs to photograph just the pill. See `ScreenshotMode`.
+    var windowNumber: Int? { panel?.windowNumber }
+
     func show() {
         model.reset()
         let panel = panel ?? makePanel()

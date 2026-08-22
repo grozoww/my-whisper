@@ -44,6 +44,7 @@ And one that follows from them:
 ./scripts/run.sh --selftest speech.wav ru   # transcribe a file, no UI or permissions needed
 ./scripts/audit-deps.sh          # dependency pinning and vulnerability check
 ./scripts/package.sh --unsigned  # build a distributable DMG, no Apple account needed
+./scripts/screenshots.sh         # redraw docs/images, the README's screenshots
 ./scripts/make-icon.swift        # redraw the app icon into Sources/Resources/Assets.xcassets
 
 OURWHISPER_SECTION=modes open -a OurWhisper   # open the window on a given screen
@@ -56,6 +57,11 @@ transcription works, this is the command** — not launching the app.
 `OURWHISPER_SECTION` exists for the same reason on the UI side: the window is only reachable by
 clicking a menu bar icon, which nothing automated can do. Values are the `NavigationSection` raw
 values (`home`, `modes`, `vocabulary`, `configuration`, `sound`, `modelsLibrary`, `history`).
+
+`screenshots.sh` is the third of these. It launches the app with `OURWHISPER_SCREENSHOT=<target>`,
+which seeds demo data, poses one screen and prints its window number for `screencapture` — see
+`ScreenshotMode`. **If you are an agent and want to see what a screen looks like**, this is the
+command, and it is cheaper than the throwaway harness.
 
 ## Layout
 

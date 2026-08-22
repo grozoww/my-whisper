@@ -63,6 +63,7 @@ permission is missing rather than failing quietly.
 ./scripts/run.sh --logs                   # stream the app's logs
 ./scripts/run.sh --selftest speech.wav ru # transcribe a file, no UI or permissions needed
 ./scripts/audit-deps.sh                   # dependency pinning and vulnerability check
+./scripts/screenshots.sh                  # redraw the README's screenshots
 
 OURWHISPER_SECTION=modes open -a OurWhisper   # open the window straight onto a screen
 ```
@@ -218,6 +219,22 @@ unnotarized download at all, claiming the app is damaged, and talking every user
 Keep it dependency-free. It has to run on a stock Mac, which means no `jq`, and Python cannot be
 assumed either. It parses the GitHub API with `grep`, and it is short enough to read before
 running, which is the only reason anyone should be willing to pipe it into a shell.
+
+### The screenshots
+
+`./scripts/screenshots.sh` redraws `docs/images`. It launches the real app once per shot with
+`OURWHISPER_SCREENSHOT` set, which poses that screen with invented demo data and prints its window
+number, then photographs that one window — see `ScreenshotMode`. Your own settings, modes and
+history are never in the pictures: screenshot mode redirects the app's storage to a throwaway
+directory, the same trick the tests use.
+
+The app cannot photograph itself. Screen recording is granted per bundle and a debug build's path
+changes with the checkout, so a fresh build has been granted nothing while your terminal already
+has. Blank or black images mean that permission is missing — System Settings ▸ Privacy & Security
+▸ Screen Recording, for whatever ran the script.
+
+Re-run it when a screen changes shape, and commit the PNGs. Light and dark are separate files;
+the README picks between them with `<picture>`.
 
 ### The app icon
 
