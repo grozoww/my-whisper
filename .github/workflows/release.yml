@@ -1,0 +1,61 @@
+name: Release
+
+# Tag-triggered and restricted to the main repository. A fork — including a fork's pull request —
+# can never reach the signing certificate or the notarization credentials below.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Sign, notarize, publish
+    runs-on: macos-latest
+    if: github.repository == 'grozoww/our-whisper'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Required repository secrets:
+      #   MACOS_CERTIFICATE          base64 of the Developer ID Application .p12
+      #   MACOS_CERTIFICATE_PASSWORD password for that .p12
+      #   MACOS_SIGNING_IDENTITY     e.g. "Developer ID Application: Name (TEAMID)"
+      #   APPLE_TEAM_ID              10-character team id
+      #   NOTARY_APPLE_ID            Apple ID used for notarization
+      #   NOTARY_PASSWORD            app-specific password for that Apple ID
+      - name: Import signing certificate
+        env:
+          MACOS_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PASSWORD="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -t 3600 -u build.keychain
+          echo "$MACOS_CERTIFICATE" | base64 --decode > /tmp/cert.p12
+          security import /tmp/cert.p12 -k build.keychain \
+            -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          rm -f /tmp/cert.p12
+
+      - name: Build, sign, notarize, staple
+        env:
+          SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTARY_APPLE_ID: ${{ secrets.NOTARY_APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
+        run: ./scripts/package.sh
+
+      - name: Publish
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          generate_release_notes: true
+
+      - name: Clean up keychain
+        if: always()
+        run: security delete-keychain build.keychain || true

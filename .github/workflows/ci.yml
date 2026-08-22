@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      # CODE_SIGNING_ALLOWED=NO is what keeps this job secret-free: it compiles and links the app
+      # without needing any certificate, so pull requests from forks build exactly like ours.
+      - name: Build
+        run: |
+          xcodebuild \
+            -project OurWhisper.xcodeproj \
+            -scheme OurWhisper \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Guard against committed secrets
+        run: |
+          if git ls-files | grep -Ei '\.(p12|cer|mobileprovision|provisionprofile)$|(^|/)\.env'; then
+            echo "::error::A credential-shaped file is tracked in git. Remove it and rotate the key."
+            exit 1
+          fi
+          echo "No credential files tracked."

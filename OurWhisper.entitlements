@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- NOT sandboxed. The Accessibility API cannot reach other apps from inside the App Sandbox,
+	     and pasting into the focused field of another app is the entire point of this program.
+	     Distribution is therefore Developer ID + notarization, not the Mac App Store. -->
+
+	<!-- Required under the hardened runtime to open the microphone. -->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

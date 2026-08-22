@@ -1,0 +1,31 @@
+# macOS
+.DS_Store
+
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved.bak
+
+# Release artifacts
+dist/
+*.dmg
+*.zip
+
+# Secrets — never commit. API keys live in the user's Keychain at runtime.
+*.p12
+*.cer
+*.provisionprofile
+.env
+.env.*
