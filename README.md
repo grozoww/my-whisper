@@ -136,6 +136,13 @@ It is a menu bar app — look for the microphone icon in the menu bar, not the D
 "Show in the Dock" switch in Configuration if you would rather have one, and an "Open at login"
 switch next to it.
 
+You grant Accessibility once and it stays granted. macOS attaches that permission to the app's
+code signature, so releases are signed with a certificate that does not change between versions.
+Upgrading from a release older than that change costs you the grant one last time: the entry in
+System Settings still shows a ticked OurWhisper and no longer applies to the new build. The Home
+screen has a **Reset and ask again** button for exactly that, and by hand it is removing
+OurWhisper from the list with the **−** button and adding it back.
+
 Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Privacy

@@ -185,10 +185,12 @@ private struct UpdateBanner: View {
 
 /// The "I granted it and it still says no" row.
 ///
-/// Accessibility is granted to an app *bundle at a path*. A debug build lives in DerivedData, and
-/// a second clone or a git worktree produces a second OurWhisper.app — so System Settings shows a
-/// ticked OurWhisper while the copy you just launched has been granted nothing. Nothing in the
-/// permission API can tell you that; only seeing the two paths side by side can.
+/// Two things cause it, and neither is visible in System Settings, which lists an app by name.
+/// macOS records the grant against a code signature and a bundle path: a debug build lives in
+/// DerivedData, and a second clone or a git worktree produces a second OurWhisper.app; a release
+/// signed by a different certificate is a different app for the same reason. Either way the old
+/// entry stays in the list, ticked, applying to nothing. Nothing in the permission API reports
+/// that — seeing the path, and being able to clear the entry, is the whole fix.
 private struct GrantedButStillDeniedRow: View {
     @Environment(AppState.self) private var appState
 
@@ -198,14 +200,21 @@ private struct GrantedButStillDeniedRow: View {
                 symbol: "questionmark.circle",
                 title: "Already granted it and this still says no?",
                 detail: appState.permissions.hasOtherBuilds
-                    ? "There is more than one OurWhisper.app on this Mac. macOS grants Accessibility to one app bundle at one path, so a permission granted to another build does not apply here. Remove every OurWhisper from the Accessibility list, then add the exact app below."
-                    : "macOS grants Accessibility to one app bundle at one path. Remove OurWhisper from the Accessibility list, then add back the exact app below.",
+                    ? "There is more than one OurWhisper.app on this Mac, and macOS records the grant against one build's signature and path. A permission granted to another one does not apply here, however ticked it looks. Reset clears the stale entry and asks again for the build below."
+                    : "macOS records the grant against the app's code signature, so an entry added for an earlier version can sit in the list ticked and apply to nothing. Reset clears it and asks again.",
                 tint: .orange
             ) {
-                Button("Reveal this build") {
-                    NSWorkspace.shared.activateFileViewerSelecting([appState.permissions.runningBundleURL])
+                HStack(spacing: 8) {
+                    Button("Reveal this build") {
+                        NSWorkspace.shared.activateFileViewerSelecting([appState.permissions.runningBundleURL])
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Reset and ask again") {
+                        Task { await appState.permissions.resetAccessibilityGrant() }
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-                .buttonStyle(.bordered)
             }
 
             Text(appState.permissions.runningBundleURL.path(percentEncoded: false))

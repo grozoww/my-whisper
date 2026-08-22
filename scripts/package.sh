@@ -2,27 +2,33 @@
 #
 # Builds a distributable OurWhisper.dmg.
 #
-# Two paths, and which one you get depends on whether you have a Developer ID certificate:
+# Three paths, and which one you get depends on what certificate is available:
 #
 #   Signed and notarized — needs a paid Apple Developer account. Downloads open with a
 #   double-click and no warning. This is what a release should be.
 #
-#   Ad-hoc signed — needs nothing. Produces a perfectly good DMG that Gatekeeper will refuse to
-#   open on a first double-click, because Apple has not vouched for it. Users get past that with
-#   right-click → Open, once. The script writes the exact wording to give them.
+#   Self-signed — needs only ./scripts/release-cert.sh. Gatekeeper still refuses the first
+#   double-click, so users still need scripts/install.sh. What it buys is the thing ad-hoc
+#   signing cannot: a signature whose designated requirement names the *certificate* rather than
+#   one exact binary, so the Accessibility grant survives an update instead of silently dying.
+#   This is the path this project actually ships on.
+#
+#   Ad-hoc signed — needs nothing, and costs every user their Accessibility permission on every
+#   update. Only for builds nobody installs. See release-cert.sh for why.
 #
 # Runs in CI (see .github/workflows/release.yml) and locally. Kept as a script rather than inline
 # YAML so a release can be reproduced and debugged on a laptop.
 #
-#   ./scripts/package.sh              signed and notarized if the environment below is set,
-#                                     otherwise ad-hoc
-#   ./scripts/package.sh --unsigned   ad-hoc even when credentials are available
+#   ./scripts/package.sh              the best path the environment below allows
+#   ./scripts/package.sh --unsigned   ad-hoc even when a certificate is available
 #
-# Environment for the signed path:
-#   SIGNING_IDENTITY   "Developer ID Application: Name (TEAMID)"
-#   APPLE_TEAM_ID      10-character team id
-#   NOTARY_APPLE_ID    Apple ID for notarization
-#   NOTARY_PASSWORD    app-specific password for that Apple ID
+# Environment:
+#   SIGNING_IDENTITY   certificate to sign with. "OurWhisper Release" for the self-signed path,
+#                      "Developer ID Application: Name (TEAMID)" for the notarized one. Left
+#                      unset, a local "OurWhisper Release" in the keychain is picked up anyway.
+#   APPLE_TEAM_ID      10-character team id          ┐
+#   NOTARY_APPLE_ID    Apple ID for notarization     ├ all three, and only all three, add
+#   NOTARY_PASSWORD    app-specific password for it  ┘ notarization on top
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -37,26 +43,50 @@ APP="$BUILD_DIR/$APP_NAME.app"
 # scripts/version.sh for how the number is arrived at.
 eval "$(./scripts/version.sh)"
 
-# Decide the path before building: the two produce different signatures, so this cannot be worked
-# out afterwards.
-NOTARIZE=true
+# The certificate created by scripts/release-cert.sh. Named here rather than only in that script
+# so a hand-run package.sh on the machine that owns the key does not quietly fall back to ad-hoc.
+RELEASE_CERT="OurWhisper Release"
+
+# Decide before building: each path produces a different signature, and which one you got cannot
+# be worked out afterwards.
+#
+# "-" is ad-hoc — a real signature with no certificate behind it. Preferred over no signature at
+# all, because macOS refuses to run an unsigned arm64 binary outright, but it is the path that
+# breaks Accessibility on every update.
 if [ "${1:-}" = "--unsigned" ]; then
-  NOTARIZE=false
-elif [ -z "${SIGNING_IDENTITY:-}" ] || [ -z "${NOTARY_APPLE_ID:-}" ] || [ -z "${NOTARY_PASSWORD:-}" ]; then
-  NOTARIZE=false
+  IDENTITY="-"
+elif [ -n "${SIGNING_IDENTITY:-}" ]; then
+  IDENTITY="$SIGNING_IDENTITY"
+elif security find-identity -p codesigning 2>/dev/null | grep -q "$RELEASE_CERT"; then
+  IDENTITY="$RELEASE_CERT"
+else
+  IDENTITY="-"
 fi
 
-if [ "$NOTARIZE" = true ]; then
+# Notarization is a separate question from signing, and the reason these two used to be one flag
+# is the reason releases shipped ad-hoc: with no Apple account there were no notary credentials,
+# so the script skipped the certificate too. A self-signed certificate cannot be notarized, and
+# does not need to be — it is there for the Accessibility grant, not for Gatekeeper.
+NOTARIZE=false
+if [ "$IDENTITY" != "-" ] && [ -n "${NOTARY_APPLE_ID:-}" ] && [ -n "${NOTARY_PASSWORD:-}" ]; then
   : "${APPLE_TEAM_ID:?APPLE_TEAM_ID is required for a notarized build}"
-  IDENTITY="$SIGNING_IDENTITY"
+  NOTARIZE=true
+fi
+
+# The suffix is what someone scrolling the releases page has to judge a download by, so it says
+# which of the three they are getting rather than lumping the last two together.
+if [ "$NOTARIZE" = true ]; then
   DMG="$DIST_DIR/$APP_NAME-$VERSION.dmg"
+elif [ "$IDENTITY" != "-" ]; then
+  DMG="$DIST_DIR/$APP_NAME-$VERSION-unnotarized.dmg"
+  echo "==> Signing with '$IDENTITY'. Not notarized, so Gatekeeper still warns on first open,"
+  echo "    but the Accessibility grant will survive updates. See dist/INSTALL.md."
+  echo
 else
-  # "-" is ad-hoc: a real signature with no certificate behind it. Preferred over no signature at
-  # all, because macOS refuses to run an unsigned arm64 binary outright.
-  IDENTITY="-"
   DMG="$DIST_DIR/$APP_NAME-$VERSION-unsigned.dmg"
-  echo "==> No Developer ID credentials. Building an ad-hoc signed DMG."
-  echo "    It will work, but Gatekeeper will warn on first open. See dist/INSTALL.md."
+  echo "==> No signing certificate. Building an ad-hoc signed DMG."
+  echo "    Gatekeeper will warn on first open, AND every user loses their Accessibility"
+  echo "    permission on every update. Run ./scripts/release-cert.sh to fix that."
   echo
 fi
 
@@ -149,6 +179,34 @@ if [ "$NOTARIZE" = true ]; then
   spctl --assess --type open --context context:primary-signature -vv "$DMG" || true
   write_checksums
 else
+  # The one thing a person upgrading needs told, and it differs by path — which is the whole
+  # reason the two are worth distinguishing on the release page.
+  if [ "$IDENTITY" != "-" ]; then
+    # A quoted heredoc, not a double-quoted string: the note contains backticks, and inside double
+    # quotes those are command substitution.
+    UPGRADE_NOTE="$(cat <<'NOTE'
+This build is signed with a stable certificate, so macOS keeps the Accessibility grant across
+updates. Coming from a release older than that change you lose it once, because the entry System
+Settings is showing was granted to a differently signed app: it still displays a ticked
+OurWhisper, and it no longer applies. Remove OurWhisper from the list with the **-** button and
+add this build back, or run
+
+```bash
+tccutil reset Accessibility com.grozoww.ourwhisper
+```
+
+and grant it again. That is the last time you have to.
+NOTE
+)"
+  else
+    UPGRADE_NOTE="$(cat <<'NOTE'
+Because this build is ad-hoc signed, its signature changes with every release. macOS treats that
+as a different app and drops the Accessibility grant, so after an update you have to re-tick
+OurWhisper in System Settings > Privacy & Security > Accessibility.
+NOTE
+)"
+  fi
+
   # Written to a file rather than printed, so the release workflow can paste it into the release
   # notes verbatim. Someone who downloads an app that refuses to open and is given no explanation
   # concludes it is broken.
@@ -181,14 +239,19 @@ OurWhisper asks for **Microphone** and **Accessibility** permission. Both are re
 microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.
 It is a menu bar app — look for the microphone icon in the menu bar, not the Dock.
 
-Because these builds are ad-hoc signed, the signature changes with every release. macOS treats
-that as a different app and drops the Accessibility grant, so after an update you may have to
-re-tick OurWhisper in System Settings › Privacy & Security › Accessibility.
+$UPGRADE_NOTE
 INSTALL
 
   echo
-  echo "✓ $DMG is built and ad-hoc signed."
-  echo "  Not notarized, so Gatekeeper will warn on first open."
+  if [ "$IDENTITY" != "-" ]; then
+    echo "✓ $DMG is built and signed with '$IDENTITY'."
+    echo "  Not notarized, so Gatekeeper will warn on first open, but the Accessibility grant"
+    echo "  survives updates. Designated requirement:"
+    codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /    /p'
+  else
+    echo "✓ $DMG is built and ad-hoc signed."
+    echo "  Not notarized, and users lose Accessibility on every update."
+  fi
   echo "  Ship $DIST_DIR/INSTALL.md alongside it, or paste it into the release notes."
   write_checksums
 fi
