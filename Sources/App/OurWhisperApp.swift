@@ -11,7 +11,11 @@ struct OurWhisperApp: App {
                 .environment(appState)
                 .task {
                     AppStateHolder.shared = appState
-                    await appState.start()
+                    if ScreenshotMode.isActive {
+                        await ScreenshotMode.run(appState: appState)
+                    } else {
+                        await appState.start()
+                    }
                 }
         }
         .defaultSize(width: 940, height: 660)

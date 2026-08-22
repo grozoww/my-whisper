@@ -1,6 +1,22 @@
-# OurWhisper
+<p align="center">
+  <img src="docs/images/icon.png" alt="" width="128" height="128">
+</p>
 
-Local dictation for macOS. Hold a hotkey, talk, and the text lands in whatever field has focus.
+<h1 align="center">OurWhisper</h1>
+
+<p align="center">
+  Local dictation for macOS. Hold a hotkey, talk, and the text lands in whatever field has focus.
+</p>
+
+<p align="center">
+  <a href="#install-it-now"><b>Install</b></a> ·
+  <a href="https://github.com/grozoww/my-whisper/releases">Releases</a> ·
+  <a href="CONTRIBUTING.md">Build from source</a>
+</p>
+
+<p align="center">
+  <img src="docs/images/pill-listening.png" alt="The recording pill: a small dark capsule showing five audio bars" width="156">
+</p>
 
 Transcription runs on your Mac's Neural Engine. No audio leaves the machine unless you explicitly
 turn on the optional cloud provider. There is no account, no telemetry, and no paid tier.
@@ -15,6 +31,11 @@ curl -fsSL https://raw.githubusercontent.com/grozoww/my-whisper/main/scripts/ins
 
 Requires macOS 15 or later on Apple Silicon. What that script does, and how to install by hand
 instead, is under [Install](#install).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
+  <img src="docs/images/home-light.png" alt="The Home screen: speed, words and time saved across the top, then the hotkey, the speech model and the active mode">
+</picture>
 
 ## Why another one
 
@@ -50,6 +71,28 @@ the optional cloud provider instead.
 - **History** — searchable, stored locally, with a retention setting that actually deletes. Keeps
   the raw transcript next to the cleaned one, so a bad result can be traced to the stage that
   caused it.
+
+## What it looks like
+
+**Modes** — a mode is a named way of cleaning up what you said. Five are built in. The cleanup
+rules run on every dictation with no model involved; the model instructions further down the
+screen are what the on-device model is told when it is switched on.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/modes-dark.png">
+  <img src="docs/images/modes-light.png" alt="The Modes screen: the list of modes, the selected mode's name, colour and symbol, and the cleanup rule toggles">
+</picture>
+
+**History** — every dictation, searchable, on your disk. The raw transcript is kept next to the
+cleaned one, so when the wrong thing gets typed you can see which stage did it.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/history-dark.png">
+  <img src="docs/images/history-light.png" alt="The History screen: a list of transcripts on the left, and the selected one's pasted text, raw text and details on the right">
+</picture>
+
+The screenshots are made by `./scripts/screenshots.sh`, which runs the real app against invented
+demo data.
 
 ## Languages
 

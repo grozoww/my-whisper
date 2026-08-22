@@ -112,6 +112,12 @@ final class DictationController {
         hotkeyArmed = hotkeys.arm()
     }
 
+    /// Screenshot mode only, alongside `PermissionsManager.poseAsGranted`. No event tap is
+    /// installed during a screenshot run, so Home would otherwise be a picture of a warning.
+    func poseAsArmed() {
+        hotkeyArmed = true
+    }
+
     private func prepareModel() async {
         // Nothing to download when the user runs entirely on the cloud engine, and downloading
         // 600 MB they asked not to use would be rude.

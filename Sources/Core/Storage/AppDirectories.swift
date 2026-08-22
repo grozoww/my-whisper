@@ -21,6 +21,12 @@ enum AppDirectories {
         if isRunningTests {
             base = URL(fileURLWithPath: NSTemporaryDirectory())
                 .appendingPathComponent("OurWhisper-test-host-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        } else if ScreenshotMode.isActive {
+            // Same reason as the test redirect: the README's pictures are seeded demo data, and a
+            // screenshot run must not read — or write over — the modes, vocabulary and history of
+            // whoever is taking them.
+            base = URL(fileURLWithPath: NSTemporaryDirectory())
+                .appendingPathComponent("OurWhisper-screenshots-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
         } else {
             base = FileManager.default
                 .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
