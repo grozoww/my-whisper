@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="#install"><b>Install</b></a> ·
+  <a href="#install-it-now"><b>Install</b></a> ·
   <a href="https://github.com/grozoww/my-whisper/releases">Releases</a> ·
   <a href="CONTRIBUTING.md">Build from source</a>
 </p>
@@ -22,6 +22,15 @@ Transcription runs on your Mac's Neural Engine. No audio leaves the machine unle
 turn on the optional cloud provider. There is no account, no telemetry, and no paid tier.
 
 > Status: feature-complete and building from source. Not yet released — see [Roadmap](#roadmap).
+
+## Install it now
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/grozoww/my-whisper/main/scripts/install.sh | bash
+```
+
+Requires macOS 15 or later on Apple Silicon. What that script does, and how to install by hand
+instead, is under [Install](#install).
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
