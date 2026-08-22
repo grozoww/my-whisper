@@ -32,8 +32,10 @@ BUILD_DIR="build/release"
 DIST_DIR="dist"
 APP="$BUILD_DIR/$APP_NAME.app"
 
-# MARKETING_VERSION in the project is the single source of truth for the version number.
-VERSION="$(grep -m1 'MARKETING_VERSION' OurWhisper.xcodeproj/project.pbxproj | sed 's/.*= *//; s/;//')"
+# VERSION, BUILD, SHA and RELEASE_NAME. Derived rather than read out of the project, so the DMG
+# filename, the version inside the app and the name on the release page cannot drift apart. See
+# scripts/version.sh for how the number is arrived at.
+eval "$(./scripts/version.sh)"
 
 # Decide the path before building: the two produce different signatures, so this cannot be worked
 # out afterwards.
@@ -71,7 +73,7 @@ write_checksums() {
 rm -rf "$BUILD_DIR" "$DIST_DIR"
 mkdir -p "$BUILD_DIR" "$DIST_DIR"
 
-echo "==> Building $APP_NAME $VERSION (Release)"
+echo "==> Building $APP_NAME $VERSION (build $BUILD, $SHA, Release)"
 BUILD_ARGS=(
   -project "$APP_NAME.xcodeproj"
   -scheme "$APP_NAME"
@@ -79,6 +81,11 @@ BUILD_ARGS=(
   -destination 'platform=macOS'
   CONFIGURATION_BUILD_DIR="$PWD/$BUILD_DIR"
   CODE_SIGN_STYLE=Manual
+  # Stamped on the command line, not read from the project. UpdateChecker compares the release
+  # tag against CFBundleShortVersionString, so an app that reports a version older than the
+  # release it came from tells every user to upgrade to what they are already running.
+  MARKETING_VERSION="$VERSION"
+  CURRENT_PROJECT_VERSION="$BUILD"
   # On the command line rather than only in the project, because Swift package targets live in a
   # generated project of their own and do not inherit ARCHS from ours. Without this the Release
   # build goes universal and fails compiling FluidAudio for x86_64 — a machine this app cannot run
