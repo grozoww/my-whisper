@@ -58,6 +58,10 @@ struct RootView: View {
         }
         .buttonStyle(.plain)
         .pointerStyle(.link)
+        // A toolbar item at `.primaryAction` sits hard against the window edge, and a plain label
+        // with no button chrome around it has nothing to hold it off. This is the inset the glass
+        // background would have given it.
+        .padding(.trailing, 12)
         .help("Dictation records from this microphone. Click to change it in Sound.")
     }
 
