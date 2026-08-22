@@ -12,11 +12,15 @@
 #
 # Why this exists rather than "download the DMG and drag it across":
 #
-# There is no paid Apple Developer account behind this project, so releases are ad-hoc signed and
-# not notarized. macOS attaches `com.apple.quarantine` to anything downloaded by a browser, and
-# for a build Apple has not vouched for it then refuses to open it at all — the dialog says the
-# app "is damaged", which is both alarming and untrue. Removing that flag is the one manual step
-# every user would otherwise have to be talked through, so the script does it and says so.
+# There is no paid Apple Developer account behind this project, so releases are signed with a
+# certificate of the project's own rather than notarized. macOS attaches `com.apple.quarantine` to
+# anything downloaded by a browser, and for a build Apple has not vouched for it then refuses to
+# open it at all — the dialog says the app "is damaged", which is both alarming and untrue.
+# Removing that flag is the one manual step every user would otherwise have to be talked through,
+# so the script does it and says so.
+#
+# It also clears a dead Accessibility grant, which is the other step people used to have to be
+# talked through. See "Accessibility" below.
 #
 # The trade you are making by running this is the ordinary one for unnotarized software: you are
 # trusting the publisher of this repository instead of Apple's review. Read the script first if
@@ -45,9 +49,9 @@ Options (pass them after `bash -s --` when piping):
   --prefix DIR       install somewhere other than /Applications
   --no-open          install but do not launch
 
-Releases are ad-hoc signed rather than notarized, because there is no paid Apple Developer
-account behind this project. macOS refuses to open such a download at all, claiming the app is
-damaged, until the quarantine flag is cleared — which is the step this script exists to do.
+Releases are signed but not notarized, because there is no paid Apple Developer account behind
+this project. macOS refuses to open such a download at all, claiming the app is damaged, until the
+quarantine flag is cleared — which is the step this script exists to do.
 USAGE
 }
 
@@ -163,12 +167,40 @@ MOUNT="$(hdiutil attach "$WORK/$DMG_FILE" -nobrowse -readonly -mountrandom /tmp 
 mkdir -p "$PREFIX" 2>/dev/null || true
 [ -w "$PREFIX" ] || die "$PREFIX is not writable by this account. Re-run with --prefix \"\$HOME/Applications\"."
 
+# MARK: - Accessibility
+#
+# Read before the old bundle is deleted, because it cannot be read afterwards. macOS records the
+# Accessibility grant against the *designated requirement* of the signature that was installed
+# when the user granted it. If the incoming build has a different one, that grant is already dead
+# — System Settings goes on showing a ticked OurWhisper that applies to nothing, which is the
+# single most confusing way this app has ever failed. Comparing the two is what tells us whether
+# it happened, and `-r-` writes to stderr, and comments the line out when the requirement is
+# implicit, which is why both are handled here.
+requirement_of() {
+  codesign -d -r- "$1" 2>&1 | sed -n 's/^#* *designated => //p'
+}
+
+OLD_REQUIREMENT=""
+[ -d "$DEST" ] && OLD_REQUIREMENT="$(requirement_of "$DEST" || true)"
+
 # Replaced rather than merged. Copying over an existing bundle leaves files from the old version
 # behind inside it, and a code signature covering files that are no longer supposed to be there
 # fails to validate.
 step "Installing to $DEST"
 rm -rf "$DEST"
 ditto "$MOUNT/$APP_NAME.app" "$DEST"
+
+# Only when it actually changed. Resetting unconditionally would take a working permission away
+# from everyone who reinstalls, which is a worse bug than the one this fixes.
+NEW_REQUIREMENT="$(requirement_of "$DEST" || true)"
+if [ -n "$OLD_REQUIREMENT" ] && [ "$OLD_REQUIREMENT" != "$NEW_REQUIREMENT" ]; then
+  step "Clearing the Accessibility permission granted to the old build"
+  echo "    Its signature changed, so macOS no longer applies that grant to this build."
+  echo "    You will be asked for Accessibility once more, and this should be the last time."
+  # No sudo: tccutil resets an app's own entry for the logged-in user. A failure here is not fatal
+  # — the app's Home screen offers the same reset, and says how to do it by hand.
+  tccutil reset Accessibility com.grozoww.ourwhisper >/dev/null 2>&1 || true
+fi
 
 hdiutil detach "$MOUNT" -quiet
 MOUNT=""
@@ -188,10 +220,9 @@ echo "  On first run it asks for two permissions, and needs both:"
 echo "    Microphone      to hear you"
 echo "    Accessibility   to watch for the hotkey and paste into the focused field"
 echo
-echo "  Note for upgrades: these builds are ad-hoc signed, so their signature changes with every"
-echo "  release. macOS treats that as a different app and drops the Accessibility grant, which"
-echo "  looks like 'dictation stopped working'. Re-tick OurWhisper in System Settings ›"
-echo "  Privacy & Security › Accessibility after an update."
+echo "  Accessibility survives updates: releases are signed with a certificate that does not"
+echo "  change between versions, which is what macOS ties the permission to. If dictation ever"
+echo "  stops after an upgrade anyway, the Home screen has a 'Reset and ask again' button."
 echo
 
 if [ "$OPEN_AFTER" = true ]; then

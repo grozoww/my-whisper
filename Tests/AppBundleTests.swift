@@ -6,9 +6,10 @@ import Testing
 
 /// How the app presents itself to macOS, rather than what it does with a recording.
 ///
-/// Both of the things covered here fail silently. A missing app icon compiles, links, packages and
+/// Everything covered here fails silently. A missing app icon compiles, links, packages and
 /// installs, and is only noticed by whoever looks in the Dock. A login item that cannot register
-/// says nothing at all — the app simply does not come back after a restart.
+/// says nothing at all — the app simply does not come back after a restart. And a permission reset
+/// aimed at the wrong identifier reports success while fixing nothing.
 @Suite("App bundle")
 struct AppBundleTests {
     /// The tests run against the app as their host, so `Bundle.main` is the real app bundle. That
@@ -45,5 +46,20 @@ struct AppBundleTests {
         let before = LaunchAtLogin.status
         #expect(LaunchAtLogin.isEnabled == (before == .enabled))
         #expect(LaunchAtLogin.status == before)
+    }
+
+    /// Inspected, never run. Running it would clear the Accessibility grant of whoever ran the
+    /// suite — and because the app is its own test host, the bundle it would clear is the real
+    /// one. What is worth pinning down is the target: an identifier that is empty, stale or
+    /// belonging to something else makes `tccutil` report success having fixed nothing, which is
+    /// indistinguishable to the user from the bug the button exists to fix.
+    @Test("The Accessibility reset targets this app and nothing else")
+    @MainActor
+    func accessibilityResetTargetsThisApp() throws {
+        let identifier = try #require(Bundle.main.bundleIdentifier)
+        let command = try #require(PermissionsManager().accessibilityResetCommand)
+
+        #expect(command.path == "/usr/bin/tccutil")
+        #expect(command.arguments == ["reset", "Accessibility", identifier])
     }
 }

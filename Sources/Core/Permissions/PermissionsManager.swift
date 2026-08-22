@@ -124,6 +124,43 @@ final class PermissionsManager {
         refresh()
     }
 
+    /// The command that clears this app's entry from the permission database.
+    ///
+    /// Exposed as a value rather than only run, so a test can check what would be run — actually
+    /// running it would reset the Accessibility permission of whoever ran the suite.
+    nonisolated var accessibilityResetCommand: (path: String, arguments: [String])? {
+        guard let identifier = Bundle.main.bundleIdentifier, !identifier.isEmpty else { return nil }
+        return ("/usr/bin/tccutil", ["reset", "Accessibility", identifier])
+    }
+
+    /// Forgets this app's Accessibility entry, then asks for it again.
+    ///
+    /// System Settings lists an app by *name*, but macOS records the grant against a code signing
+    /// requirement. An entry granted to a differently signed OurWhisper — an older release, or a
+    /// build from another checkout — therefore sits in the list looking ticked while applying to
+    /// nothing, and unticking and re-ticking it does not reliably replace the stale record.
+    /// Removing it does. This is the `-` button in System Settings, minus having to know that is
+    /// the fix.
+    ///
+    /// Only offered while Accessibility is denied, so there is never a working grant to destroy.
+    func resetAccessibilityGrant() async {
+        guard let command = accessibilityResetCommand else { return }
+
+        await Task.detached {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: command.path)
+            process.arguments = command.arguments
+            // A failure is not worth interrupting anyone over: the row stays on screen, and the
+            // instructions printed beside the button are still the way through by hand.
+            try? process.run()
+            process.waitUntilExit()
+        }.value
+
+        // Removing the entry is also what makes macOS willing to show its one-time prompt again,
+        // which is why the request comes after the reset rather than instead of it.
+        requestAccessibility()
+    }
+
     // MARK: - Settings deep links
 
     enum Pane {

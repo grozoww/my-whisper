@@ -44,7 +44,8 @@ And one that follows from them:
 ./scripts/run.sh --logs          # stream the app's logs at info level
 ./scripts/run.sh --selftest speech.wav ru   # transcribe a file, no UI or permissions needed
 ./scripts/audit-deps.sh          # dependency pinning and vulnerability check
-./scripts/package.sh --unsigned  # build a distributable DMG, no Apple account needed
+./scripts/package.sh             # build a distributable DMG, signed so permission survives
+./scripts/release-cert.sh        # once, ever: the certificate every release is signed with
 ./scripts/screenshots.sh         # redraw docs/images, the README's screenshots
 ./scripts/make-icon.swift        # redraw the app icon into Sources/Resources/Assets.xcassets
 
@@ -128,9 +129,17 @@ which is what a password manager sets on a copied password.
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
 
-**Signing is tied to Accessibility permission.** Ad-hoc signatures change every build, so macOS
-sees a new app each time and silently drops the grant. `./scripts/dev-cert.sh` fixes it. Read "The
-signing trap" in `CONTRIBUTING.md` before debugging "dictation stopped working after a rebuild".
+**Signing is tied to Accessibility permission.** macOS records the grant against the *designated
+requirement* of the signature, not against the app's bytes or its name. An ad-hoc signature's
+requirement is `cdhash H"…"` — one exact binary — so every rebuild and every release is a new app
+that has been granted nothing, and the old entry stays in System Settings looking ticked while
+applying to nothing. Signing with a certificate makes the requirement
+`identifier "com.grozoww.ourwhisper" and certificate leaf = H"…"`, which any later build signed by
+the same certificate satisfies. `./scripts/dev-cert.sh` does this for your rebuilds and
+`./scripts/release-cert.sh` for public releases; the certificates are self-signed, and Apple is
+not involved in either. Read "The signing trap" in `CONTRIBUTING.md` before debugging "dictation
+stopped working after a rebuild". Losing the release key is not recoverable — every user re-grants
+Accessibility once.
 
 **A programmatically created `NSWindow` releases itself on `close()`.** ARC then releases it again
 and the process dies. `Tests/ViewRenderingTests.swift` sets `isReleasedWhenClosed = false`.
@@ -219,8 +228,12 @@ requires a `detail` for that reason.
 
 **Anything users download.** `scripts/package.sh` builds the DMG and `scripts/install.sh` is the
 `curl | bash` that installs it. There is no Apple Developer account behind this project, so
-releases are ad-hoc signed rather than notarized and macOS refuses to open them until the
-quarantine flag is cleared — which is the one thing install.sh exists to do. A pull request builds
+releases are signed with the self-signed `OurWhisper Release` certificate rather than notarized,
+and macOS refuses to open them until the quarantine flag is cleared — which is the one thing
+install.sh exists to do. Signing and notarizing are deliberately separate decisions in both
+`package.sh` and the workflow: a self-signed certificate cannot be notarized, but it is what keeps
+the Accessibility grant alive across updates, and treating the two as one flag is what made every
+release ad-hoc. A pull request builds
 the DMG in CI; a push to main publishes it to a rolling `latest` prerelease; a tag cuts a versioned
 release. Every one of them is named `release-<version>-<short sha>`.
 
@@ -231,7 +244,7 @@ anything depending on `mlx-swift` 0.31.5+ needs Xcode's separately-downloaded Me
 
 ## Testing
 
-Swift Testing, not XCTest. 117 tests, no network, no API key, no microphone, no permissions.
+Swift Testing, not XCTest. 119 tests, no network, no API key, no microphone, no permissions.
 
 - Cloud providers are tested against `StubHTTPClient` with recorded response shapes.
 - Every screen is built and laid out in `ViewRenderingTests` — a view that crashes on

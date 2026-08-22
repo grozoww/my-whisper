@@ -57,10 +57,18 @@ jobs:
       # Secrets are not available in a job-level `if:`, so which path to take is worked out here
       # and read from `env` by the steps below.
       #
-      # Required repository secrets for the notarized path:
-      #   MACOS_CERTIFICATE          base64 of the Developer ID Application .p12
+      # Signing and notarizing are two decisions, not one. Having them as one flag is what made
+      # releases ship ad-hoc: no Apple account meant no notary password, so the certificate was
+      # skipped too — and an ad-hoc signature pins the Accessibility grant to one exact binary, so
+      # every update silently broke dictation for everyone. A certificate alone fixes that. It
+      # does not have to be Apple's; ./scripts/release-cert.sh makes a self-signed one.
+      #
+      # Signing — set these three, from release-cert.sh or from a Developer ID:
+      #   MACOS_CERTIFICATE          base64 of the .p12
       #   MACOS_CERTIFICATE_PASSWORD password for that .p12
-      #   MACOS_SIGNING_IDENTITY     e.g. "Developer ID Application: Name (TEAMID)"
+      #   MACOS_SIGNING_IDENTITY     "OurWhisper Release", or "Developer ID Application: … (TEAM)"
+      #
+      # Notarizing — needs a paid Apple Developer account, and all three on top of the above:
       #   APPLE_TEAM_ID              10-character team id
       #   NOTARY_APPLE_ID            Apple ID used for notarization
       #   NOTARY_PASSWORD            app-specific password for that Apple ID
@@ -70,11 +78,17 @@ jobs:
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
           FORCED_UNSIGNED: ${{ inputs.unsigned }}
         run: |
-          if [ "$FORCED_UNSIGNED" = "true" ] || [ -z "$MACOS_CERTIFICATE" ] || [ -z "$NOTARY_PASSWORD" ]; then
+          if [ "$FORCED_UNSIGNED" = "true" ] || [ -z "$MACOS_CERTIFICATE" ]; then
             echo "SIGNED=false" >> "$GITHUB_ENV"
-            echo "Building unsigned — downloads will need right-click → Open on first launch."
+            echo "NOTARIZED=false" >> "$GITHUB_ENV"
+            echo "::warning::No signing certificate. This build is ad-hoc signed, so everyone who installs it loses their Accessibility permission on the next update. See scripts/release-cert.sh."
+          elif [ -z "$NOTARY_PASSWORD" ]; then
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+            echo "NOTARIZED=false" >> "$GITHUB_ENV"
+            echo "Signed but not notarized — downloads still need scripts/install.sh, but the Accessibility grant survives updates."
           else
             echo "SIGNED=true" >> "$GITHUB_ENV"
+            echo "NOTARIZED=true" >> "$GITHUB_ENV"
           fi
 
       - name: Import signing certificate
@@ -86,16 +100,30 @@ jobs:
           KEYCHAIN_PASSWORD="$(uuidgen)"
           security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
           security default-keychain -s build.keychain
+          # Both, and the second is the one that matters. `default-keychain -s` does not add the
+          # keychain to the search list, and codesign resolves an identity by searching the list —
+          # so with only the line above, signing fails with the flatly misleading
+          # "OurWhisper Release: no identity found" while `security find-identity build.keychain`
+          # happily shows it.
+          security list-keychains -d user -s build.keychain $(security list-keychains -d user | tr -d '"')
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          # No auto-lock timeout: the default is 300 seconds of idle, and a notarized build waits
+          # on Apple for longer than that. A keychain that relocks mid-run fails the DMG signature
+          # after the app has already been built.
           security set-keychain-settings -t 3600 -u build.keychain
           echo "$MACOS_CERTIFICATE" | base64 --decode > /tmp/cert.p12
           security import /tmp/cert.p12 -k build.keychain \
             -P "$MACOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          # Without this, codesign's first use of the key pops a GUI confirmation, which on a
+          # headless runner is an indefinite hang rather than an error.
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$KEYCHAIN_PASSWORD" build.keychain
           rm -f /tmp/cert.p12
+          security find-identity -p codesigning build.keychain
 
-      - name: Build, sign, notarize, staple
+      # package.sh notarizes only when the notary credentials below are actually present, so this
+      # one step covers both the signed-only and the notarized path.
+      - name: Build and sign
         if: env.SIGNED == 'true'
         env:
           SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
@@ -162,8 +190,8 @@ jobs:
           target_commitish: ${{ github.sha }}
           # Anything that is not a notarized tag is a prerelease, so GitHub keeps pointing people
           # at the newest real release rather than at whatever main happens to contain today.
-          prerelease: ${{ env.SIGNED == 'false' || github.ref_type != 'tag' }}
-          make_latest: ${{ github.ref_type == 'tag' && env.SIGNED == 'true' }}
+          prerelease: ${{ env.NOTARIZED == 'false' || github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' && env.NOTARIZED == 'true' }}
 
       - name: Clean up keychain
         if: always() && env.SIGNED == 'true'

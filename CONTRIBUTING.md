@@ -33,6 +33,18 @@ It prints `CSSMERR_TP_NOT_TRUSTED` next to the identity. **That is expected.** T
 deliberately not installed as a trusted root — `codesign` does not require that in order to sign
 with it, and leaving it untrusted is what keeps the script prompt-free and your trust store clean.
 
+You can see the difference the certificate makes. `codesign -d -r-` prints the *designated
+requirement*, which is what macOS actually stores the permission against:
+
+```
+ad-hoc      designated => cdhash H"e7c60c73…"
+certificate designated => identifier "com.grozoww.ourwhisper" and certificate leaf = H"5792c7a4…"
+```
+
+The first names one exact binary. The second names the bundle id and the certificate, so anything
+signed by the same certificate satisfies it. That is the whole mechanism, and it is why
+`scripts/release-cert.sh` exists for public releases — see "Shipping a build".
+
 ### The other half of the trap: two copies
 
 Accessibility is granted to one app **bundle at one path**. A second clone, or a git worktree,
@@ -170,22 +182,39 @@ that code runs on the audio thread, where "probably fine" becomes a dropout.
 ## Shipping a build
 
 ```bash
-./scripts/package.sh --unsigned    # a DMG anyone can download, no Apple account needed
-./scripts/package.sh               # signed and notarized, needs the environment below
+./scripts/release-cert.sh          # once, ever: the certificate every release is signed with
+./scripts/package.sh               # the best path the environment allows
+./scripts/package.sh --unsigned    # ad-hoc, even when a certificate is available
 ```
 
-Both produce `dist/OurWhisper-<version>.dmg` with the app and an Applications symlink inside.
+All three produce a DMG with the app and an Applications symlink inside. The filename says which
+you got: `OurWhisper-<version>.dmg`, `-unnotarized.dmg` or `-unsigned.dmg`.
 
-**Unsigned** is ad-hoc signed: a real signature with no certificate behind it. The DMG works, but
-Gatekeeper blocks the first double-click because Apple has not vouched for it, and the user has to
-right-click → Open once. `package.sh` writes `dist/INSTALL.md` with the exact wording to give them;
-the release workflow pastes it into the release notes. Do not skip that — a download that refuses
-to open with no explanation reads as broken software.
+**Self-signed** is the path this project ships on, and it is what `release-cert.sh` sets up. The
+signing trap at the top of this file applies to releases exactly as it applies to your rebuilds:
+an ad-hoc signature pins the Accessibility grant to one exact binary, so every update used to
+silently break dictation for everyone who had installed the previous one. A certificate — any
+certificate, Apple is not involved — makes the grant survive. Run the script once, put the three
+secrets it prints into the repository, and never think about it again.
+
+**Do not lose that key.** A release signed by a different certificate is a different app to macOS,
+and every user re-grants Accessibility by hand once. The script tells you to back the `.p12` up
+because there is no way to recreate it.
+
+**Unsigned** is ad-hoc signed: a real signature with no certificate behind it. Only for builds
+nobody installs — it costs every user their permission on every update. `--unsigned` exists to
+rehearse the workflow, not to ship.
+
+Neither of those is notarized, so Gatekeeper still blocks the first double-click and the user
+still needs `scripts/install.sh`. `package.sh` writes `dist/INSTALL.md` with the exact wording to
+give them; the release workflow pastes it into the release notes. Do not skip that — a download
+that refuses to open with no explanation reads as broken software.
 
 **Signed and notarized** opens with a double-click and no warning. It needs a paid Apple Developer
-account and these four values in the environment: `SIGNING_IDENTITY`, `APPLE_TEAM_ID`,
-`NOTARY_APPLE_ID`, `NOTARY_PASSWORD`. Notarization uploads the DMG to Apple and waits a few
-minutes.
+account: put the Developer ID certificate in the same three secrets and add `APPLE_TEAM_ID`,
+`NOTARY_APPLE_ID` and `NOTARY_PASSWORD`. Notarization uploads the DMG to Apple and waits a few
+minutes. Signing and notarizing are separate decisions in `package.sh` for a reason — coupling
+them is what made every release ad-hoc until the certificate arrived.
 
 ### Version numbers
 
@@ -237,8 +266,10 @@ first thing anyone asks when a download misbehaves.
 | Push a tag `v*` | the tag. Notarized if the signing secrets are set | `release-1.0.3-a1b2c3d` |
 | Actions → Run workflow | `build-<n>`, with an "unsigned" checkbox for rehearsing | `release-1.0.3-a1b2c3d (build 7)` |
 
-`.github/workflows/release.yml` picks the notarized path when the signing secrets are set and the
-unsigned path when they are not. Anything that is not a notarized tag is marked a prerelease, so
+`.github/workflows/release.yml` signs whenever `MACOS_CERTIFICATE` is set, and notarizes on top of
+that only when the notary secrets are set too. With no certificate at all it falls back to ad-hoc
+and logs a workflow warning, because that build will cost its users their Accessibility
+permission. Anything that is not a notarized tag is marked a prerelease, so
 GitHub keeps pointing people at the newest real release. The rolling release is deleted and
 recreated on each push rather than added to — reusing the tag would otherwise leave two DMGs
 attached to it once the version number changes, and `install.sh` takes the first one it finds.
