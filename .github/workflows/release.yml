@@ -5,11 +5,12 @@ name: Release
 on:
   push:
     tags: ['v*']
-    # Every push to main publishes its own prerelease, tagged with the version and the commit it
-    # was built from, so there is always a current DMG to download without anyone cutting a tag.
-    # Each one is kept: nothing is deleted and no tag is reused, so an older build stays
-    # downloadable after a newer one lands. `scripts/install.sh` reads the releases list and takes
-    # the newest build that carries a DMG, so it follows along on its own.
+    # Every push to main publishes its own release, tagged with the version and the commit it was
+    # built from, so there is always a current DMG to download without anyone cutting a tag. Each
+    # one is kept: nothing is deleted and no tag is reused, so an older build stays downloadable
+    # after a newer one lands. `scripts/install.sh` asks /releases/latest and falls back to picking
+    # the highest version out of the list — it does not trust the order GitHub returns, which is
+    # not newest-first.
     branches: [main]
   # Lets you produce a downloadable build before you have an Apple Developer account, and lets you
   # rehearse the whole thing without cutting a tag.
@@ -22,7 +23,7 @@ on:
 
 # Two pushes to main packaging at once would each build the same repository at a different commit
 # and publish within seconds of each other. They no longer collide over a tag, but serialising them
-# keeps the release list in the order the commits actually landed.
+# keeps /releases/latest pointing at the commit that actually landed last.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
