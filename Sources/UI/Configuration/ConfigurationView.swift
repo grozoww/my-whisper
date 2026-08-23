@@ -49,6 +49,15 @@ struct ConfigurationView: View {
                     Toggle("", isOn: $settings.settings.dictation.allowCloudFallback)
                         .toggleStyle(.switch)
                 }
+                RowDivider()
+                SettingsRow(
+                    symbol: "doc.on.clipboard",
+                    title: "Keep the text on the clipboard when there is nowhere to paste it",
+                    detail: "Dictating with no text field focused otherwise loses what you said — the paste goes nowhere and your previous clipboard is put back over it. On, the transcript stays on the clipboard and the pill says so; what you had copied before is not restored."
+                ) {
+                    Toggle("", isOn: $settings.settings.dictation.keepOnClipboardWhenNothingFocused)
+                        .toggleStyle(.switch)
+                }
             }
 
             SettingsSection(title: "Hotkey") {

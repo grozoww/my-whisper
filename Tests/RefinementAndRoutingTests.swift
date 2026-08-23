@@ -23,6 +23,22 @@ struct SchemaEvolutionTests {
         #expect(settings.history.retention == .days30)         // whole section defaulted
     }
 
+    @Test("A settings file written before the clipboard fallback existed picks up the new default")
+    func clipboardFallbackDefaultsOn() throws {
+        // Off is how a dictation with no text field focused is lost, so an upgrading user has to
+        // arrive with it on rather than keeping the old behaviour by accident of a missing key.
+        let json = #"{"dictation":{"language":"en"}}"#
+        let settings = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
+        #expect(settings.dictation.keepOnClipboardWhenNothingFocused)
+    }
+
+    @Test("Switching the clipboard fallback off survives a round trip")
+    func clipboardFallbackOffSurvives() throws {
+        let json = #"{"dictation":{"keepOnClipboardWhenNothingFocused":false}}"#
+        let settings = try JSONDecoder().decode(Settings.self, from: Data(json.utf8))
+        #expect(settings.dictation.keepOnClipboardWhenNothingFocused == false)
+    }
+
     @Test("A key from a newer version is ignored rather than fatal")
     func unknownKeysAreIgnored() throws {
         let json = #"{"dictation":{"language":"de","somethingFromTheFuture":42},"aWholeNewSection":{}}"#

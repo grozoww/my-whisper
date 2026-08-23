@@ -161,6 +161,9 @@ Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
   the clipboard after the text" switched on. Then it is read at the moment you start speaking,
   used for that one dictation, and dropped — it is never written to history and never sent
   anywhere. A password copied from a password manager is skipped either way.
+- Pasting borrows the clipboard and puts back what was there, with one exception: if there was no
+  text field to paste into, the transcript is left on the clipboard instead of being thrown away,
+  and the pill says so. Turn that off in Configuration if you would rather keep what you copied.
 
 ## How cleanup works
 

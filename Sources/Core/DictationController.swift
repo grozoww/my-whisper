@@ -271,7 +271,10 @@ final class DictationController {
                 ? ClipboardContext.substituted(clipboard, into: refined.text, placeholder: mode.clipboardPlaceholder)
                 : refined.text
 
-            let method = try await injector.inject(pasted)
+            let method = try await injector.inject(
+                pasted,
+                keepWhenNothingFocused: current.dictation.keepOnClipboardWhenNothingFocused
+            )
             log.debug("Injected via \(method.rawValue, privacy: .public)")
 
             // What is recorded is what was dictated, not what was pasted. History is kept for
@@ -288,8 +291,16 @@ final class DictationController {
             )
 
             phase = .idle
-            pill.setPhase(.success(injector.targetName ?? "Pasted"))
-            pill.dismiss(after: .milliseconds(700))
+            if method == .clipboardOnly {
+                // A tick and the app name would read as "pasted into Finder", which is the exact
+                // thing that did not happen. This one has to be read rather than glanced at, so
+                // it stays up longer than a paste the user watched arrive.
+                pill.setPhase(.success("Copied to the clipboard"))
+                pill.dismiss(after: .milliseconds(1600))
+            } else {
+                pill.setPhase(.success(injector.targetName ?? "Pasted"))
+                pill.dismiss(after: .milliseconds(700))
+            }
         } catch {
             log.error("Dictation failed: \(error.localizedDescription, privacy: .public)")
             notify(error.localizedDescription)

@@ -59,6 +59,12 @@ struct DictationSettings: Codable, Equatable, Sendable {
     var pushToTalkHoldDelay: Double = 1.0
     /// Soniox model id. Configurable so a provider-side rename does not need an app release.
     var sonioxModel: String = "stt-async-preview"
+    /// Leave the transcript on the clipboard when the app you were in had nothing to paste into.
+    ///
+    /// On by default, because off is how the app loses what you just said: the ⌘V arrives at an
+    /// app with no caret, and `TextInjector.clipboardRestoreDelay` later the clipboard you had
+    /// before comes back over the top of it. See `TextInjector.focusedElementAcceptsText`.
+    var keepOnClipboardWhenNothingFocused: Bool = true
 }
 
 struct RefinementSettings: Codable, Equatable, Sendable {
@@ -127,6 +133,10 @@ extension DictationSettings {
         pushToTalkChord = container.optional(.pushToTalkChord, defaultWhenAbsent: defaults.pushToTalkChord)
         pushToTalkHoldDelay = container.value(.pushToTalkHoldDelay, or: defaults.pushToTalkHoldDelay)
         sonioxModel = container.value(.sonioxModel, or: defaults.sonioxModel)
+        keepOnClipboardWhenNothingFocused = container.value(
+            .keepOnClipboardWhenNothingFocused,
+            or: defaults.keepOnClipboardWhenNothingFocused
+        )
     }
 }
 
