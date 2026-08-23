@@ -162,13 +162,16 @@ jobs:
           printf 'Version **%s** (build %s) from [`%s`](%s/commit/%s).\n\n' \
             "$VERSION" "$BUILD" "$SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA" \
             > release-notes.md
-          if [ "${{ github.ref_type }}" != "tag" ]; then
-            cat >> release-notes.md <<'UNTAGGED'
-          > **Build from `main`.** Published on every push, ahead of any version tag. This tag and
-          > its files never change, but the line it comes from is still moving — for a version
-          > someone decided to cut, use a release tagged `v…`.
+          # Only a rehearsal needs a warning now. A build from main is a finished release like any
+          # other, and telling people to wait for a `v…` tag when none is ever cut is what sent
+          # them looking for a download that does not exist.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            cat >> release-notes.md <<'REHEARSAL'
+          > **Rehearsal build.** Run by hand, not published by a merge to `main`. It stays a
+          > prerelease and the app's update check will not offer it — install it on purpose or
+          > not at all.
 
-          UNTAGGED
+          REHEARSAL
           fi
           if [ -f dist/INSTALL.md ]; then
             cat dist/INSTALL.md >> release-notes.md
@@ -195,14 +198,20 @@ jobs:
           # commit would otherwise be two releases with identical names.
           name: ${{ github.event_name == 'workflow_dispatch' && format('{0} (build {1})', env.RELEASE_NAME, github.run_number) || env.RELEASE_NAME }}
           target_commitish: ${{ github.sha }}
-          # A version tag is a finished release; everything else is a build from main. Notarization
-          # deliberately does not enter into it — it decides whether Gatekeeper complains about the
-          # download, not whether the maintainer has finished the release. Tying the two together
-          # marked *every* release a prerelease, since there is no Apple Developer account here,
-          # and `/releases/latest` skips prereleases — so the app's update check answered 404 and
-          # quietly told everyone they were up to date, for ever.
-          prerelease: ${{ github.ref_type != 'tag' }}
-          make_latest: ${{ github.ref_type == 'tag' }}
+          # Merging to main is the decision. What lands there is what people should be running, so
+          # the release it produces is a finished one and it becomes the latest — same as a version
+          # tag. Only a workflow_dispatch rehearsal stays a prerelease, because that is a build
+          # nobody merged.
+          #
+          # Marking a build from main a prerelease is what kept the update check quiet. Prereleases
+          # are skipped by `/releases/latest` *and* by `UpdateChecker`, and with no `v*` tag ever
+          # cut there was nothing left for either to find — so every user was told they were up to
+          # date, for ever, while the DMG they wanted sat in the releases list.
+          #
+          # Notarization deliberately does not enter into it. It decides whether Gatekeeper
+          # complains about the download, not whether a release is finished.
+          prerelease: ${{ github.event_name == 'workflow_dispatch' }}
+          make_latest: ${{ github.event_name != 'workflow_dispatch' }}
 
       - name: Clean up keychain
         if: always() && env.SIGNED == 'true'
