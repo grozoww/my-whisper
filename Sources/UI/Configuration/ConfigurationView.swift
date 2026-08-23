@@ -7,6 +7,9 @@ struct ConfigurationView: View {
 
     @State private var apiKeyField = ""
     @State private var keySaved = false
+    /// Read once and kept, because a Keychain lookup is an XPC call and this is asked for by four
+    /// different parts of one row — on every render of the screen.
+    @State private var hasKey = false
 
     var body: some View {
         @Bindable var settings = appState.settings
@@ -133,10 +136,10 @@ struct ConfigurationView: View {
                 subtitle: "Stored in the macOS Keychain, never in a file or a log, and only ever sent to Soniox."
             ) {
                 SettingsRow(
-                    symbol: KeychainStore.has(.soniox) ? "key.fill" : "key",
-                    title: KeychainStore.has(.soniox) ? "A key is saved" : "No key saved",
+                    symbol: hasKey ? "key.fill" : "key",
+                    title: hasKey ? "A key is saved" : "No key saved",
                     detail: "Get one at soniox.com. The app works fully without it — the key only unlocks the cloud languages.",
-                    tint: KeychainStore.has(.soniox) ? .green : .secondary
+                    tint: hasKey ? .green : .secondary
                 ) {
                     HStack(spacing: 8) {
                         SecureField("sk-…", text: $apiKeyField)
@@ -146,6 +149,7 @@ struct ConfigurationView: View {
                             KeychainStore.write(apiKeyField, for: .soniox)
                             apiKeyField = ""
                             keySaved = true
+                            hasKey = KeychainStore.has(.soniox)
                             appState.models.refresh()
                         }
                         .buttonStyle(.borderedProminent)
@@ -161,10 +165,11 @@ struct ConfigurationView: View {
                     Button("Remove") {
                         KeychainStore.delete(.soniox)
                         keySaved = false
+                        hasKey = false
                         appState.models.refresh()
                     }
                     .buttonStyle(.bordered)
-                    .disabled(!KeychainStore.has(.soniox))
+                    .disabled(!hasKey)
                 }
             }
 
@@ -219,6 +224,7 @@ struct ConfigurationView: View {
                 }
             }
         }
+        .onAppear { hasKey = KeychainStore.has(.soniox) }
         .onChange(of: appState.settings.settings.appearance.theme) { _, theme in
             theme.apply()
         }
@@ -260,13 +266,17 @@ struct ConfigurationView: View {
 private struct StartupSection: View {
     @State private var isEnabled = false
     @State private var status = LaunchAtLogin.status
+    /// Why the last attempt did not take. Nil until something actually fails.
+    @State private var failure: String?
 
     var body: some View {
         SettingsSection(title: "Startup") {
             SettingsRow(
                 symbol: "power",
                 title: "Open at login",
-                detail: LaunchAtLogin.explanation,
+                // From the state, not a fresh read: `LaunchAtLogin.status` is an XPC call and a
+                // detail string is rebuilt every time anything on this screen changes.
+                detail: failure ?? LaunchAtLogin.explanation(for: status),
                 tint: isEnabled ? .green : .secondary
             ) {
                 HStack(spacing: 8) {
@@ -274,9 +284,12 @@ private struct StartupSection: View {
                         Button("Open Login Items") { LaunchAtLogin.openLoginItemsSettings() }
                             .buttonStyle(.bordered)
                     }
+                    // Only an approval macOS refuses to override from code disables the switch.
+                    // `.notFound` does not: an app that has never registered reports it too, and
+                    // registering from that state is exactly what this switch is for.
                     Toggle("", isOn: $isEnabled)
                         .toggleStyle(.switch)
-                        .disabled(status == .requiresApproval || status == .notFound)
+                        .disabled(status == .requiresApproval)
                 }
             }
         }
@@ -284,7 +297,7 @@ private struct StartupSection: View {
         .onChange(of: isEnabled) { _, wanted in
             // A refused registration must not leave the switch showing a state macOS disagrees
             // with, so the answer always comes back from the system.
-            LaunchAtLogin.set(wanted)
+            failure = LaunchAtLogin.set(wanted)
             refresh()
         }
     }

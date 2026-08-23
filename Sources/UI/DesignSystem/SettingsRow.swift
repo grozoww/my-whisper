@@ -19,42 +19,14 @@ struct SettingsRow<Control: View>: View {
     @ViewBuilder var control: Control
 
     var body: some View {
-        // `ViewThatFits` measures the first layout at its ideal width, which the frame below
-        // pins to icon + label + control. When the pane is narrower than that, the second layout
-        // wins and the control moves to a line of its own.
-        ViewThatFits(in: .horizontal) {
-            sideBySide
-            stacked
-        }
-        .padding(14)
-    }
-
-    private var sideBySide: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
+        // The layout below makes the same decision `ViewThatFits` used to: side by side while the
+        // label still has room, stacked when it does not.
+        SettingsRowLayout {
             icon
             label
-                .frame(
-                    minWidth: settingsRowLabelWidth,
-                    idealWidth: settingsRowLabelWidth,
-                    maxWidth: .infinity,
-                    alignment: .leading
-                )
             sizedControl
         }
-    }
-
-    private var stacked: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                icon
-                label
-                Spacer(minLength: 0)
-            }
-            // Indented to the text column, so the control reads as belonging to the row above it
-            // rather than starting a new one.
-            sizedControl
-                .padding(.leading, 36)
-        }
+        .padding(14)
     }
 
     private var icon: some View {
@@ -87,6 +59,134 @@ struct SettingsRow<Control: View>: View {
 extension SettingsRow where Control == EmptyView {
     init(symbol: String, title: String, detail: String? = nil, tint: Color = .secondary) {
         self.init(symbol: symbol, title: title, detail: detail, tint: tint) { EmptyView() }
+    }
+}
+
+/// Icon, label and control on one line — or the control on its own line when the label would be
+/// squeezed below `settingsRowLabelWidth`.
+///
+/// This was a `ViewThatFits` with both arrangements written out, which is the obvious way to say
+/// it and cost far too much: `ViewThatFits` builds *every* candidate, so each row built two copies
+/// of its control, and a `Picker` is an expensive thing to build. A settings page is one SwiftUI
+/// view, so flipping any switch on it re-renders every row — the Configuration screen spent about
+/// 80 ms of the main thread on each change and animated at roughly five frames a second.
+/// Measuring each subview once and placing it costs a tenth of that.
+private struct SettingsRowLayout: Layout {
+    private static let spacing: CGFloat = 12
+    private static let stackedSpacing: CGFloat = 10
+    /// Indented to the text column, so a stacked control reads as belonging to the row above it
+    /// rather than starting a new one.
+    private static let stackedIndent: CGFloat = 36
+
+    /// One subview, measured.
+    struct Measured {
+        var size: CGSize
+        var baseline: CGFloat
+        var proposal: ProposedViewSize
+    }
+
+    struct Plan {
+        var isStacked: Bool
+        var icon: Measured
+        var label: Measured
+        /// Absent for the rows that are a sentence and nothing else — an `EmptyView` control
+        /// contributes no subview at all, and indexing past it is a crash.
+        var control: Measured?
+        var baseline: CGFloat
+        var lineHeight: CGFloat
+        var size: CGSize
+    }
+
+    /// `sizeThatFits` and `placeSubviews` are called in pairs with the same proposal, so the
+    /// second one has no reason to measure everything again.
+    struct Cache {
+        var width: CGFloat?
+        var plan: Plan?
+    }
+
+    func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> CGSize {
+        plan(for: proposal, subviews: subviews, cache: &cache).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) {
+        let plan = plan(for: proposal, subviews: subviews, cache: &cache)
+        let baseline = bounds.minY + plan.baseline
+
+        subviews[0].place(
+            at: CGPoint(x: bounds.minX, y: baseline - plan.icon.baseline),
+            proposal: plan.icon.proposal
+        )
+        subviews[1].place(
+            at: CGPoint(x: bounds.minX + plan.icon.size.width + Self.spacing, y: baseline - plan.label.baseline),
+            proposal: plan.label.proposal
+        )
+
+        guard let control = plan.control else { return }
+        if plan.isStacked {
+            subviews[2].place(
+                at: CGPoint(x: bounds.minX + Self.stackedIndent, y: bounds.minY + plan.lineHeight + Self.stackedSpacing),
+                proposal: control.proposal
+            )
+        } else {
+            subviews[2].place(
+                at: CGPoint(x: bounds.maxX - control.size.width, y: baseline - control.baseline),
+                proposal: control.proposal
+            )
+        }
+    }
+
+    /// Everything is measured against an unspecified proposal except the label, which is the one
+    /// subview whose height depends on the width it is given.
+    private func plan(for proposal: ProposedViewSize, subviews: Subviews, cache: inout Cache) -> Plan {
+        let available = proposal.width ?? .infinity
+        if let plan = cache.plan, cache.width == available { return plan }
+
+        let icon = measure(subviews[0], proposal: .unspecified)
+        let control = subviews.count > 2 ? measure(subviews[2], proposal: .unspecified) : nil
+
+        let besideWidth = available - icon.size.width - (control?.size.width ?? 0) - Self.spacing * 2
+        let isStacked = control != nil && available.isFinite && besideWidth < settingsRowLabelWidth
+
+        let labelWidth = isStacked
+            ? max(0, available - icon.size.width - Self.spacing)
+            : max(settingsRowLabelWidth, besideWidth)
+        let label = measure(subviews[1], proposal: ProposedViewSize(width: labelWidth, height: nil))
+
+        // The three sit on a shared first baseline, exactly as the `HStack` had them. A stacked
+        // control is on its own line and takes no part in it.
+        let onTheLine = isStacked ? [icon, label] : [icon, label, control].compactMap { $0 }
+        let baseline = onTheLine.map(\.baseline).max() ?? 0
+        let lineHeight = baseline + (onTheLine.map { $0.size.height - $0.baseline }.max() ?? 0)
+
+        let width = available.isFinite
+            ? available
+            : icon.size.width + label.size.width + (control?.size.width ?? 0) + Self.spacing * 2
+        let plan = Plan(
+            isStacked: isStacked,
+            icon: icon,
+            label: label,
+            control: control,
+            baseline: baseline,
+            lineHeight: lineHeight,
+            size: CGSize(
+                width: width,
+                height: isStacked ? lineHeight + Self.stackedSpacing + (control?.size.height ?? 0) : lineHeight
+            )
+        )
+
+        cache.width = available
+        cache.plan = plan
+        return plan
+    }
+
+    private func measure(_ subview: LayoutSubviews.Element, proposal: ProposedViewSize) -> Measured {
+        Measured(
+            size: subview.sizeThatFits(proposal),
+            baseline: subview.dimensions(in: proposal)[.firstTextBaseline],
+            proposal: proposal
+        )
     }
 }
 
