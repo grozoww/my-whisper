@@ -84,38 +84,71 @@ command -v curl >/dev/null 2>&1 || die "curl is required."
 
 # MARK: - Find the download
 #
-# Not /releases/latest: that endpoint skips prereleases, and answers 404 rather than nothing when
-# every release is one — which is the state this project was in for its whole life, and it is what
-# made the app's update check go quiet. Asking for the list and taking the newest release that
-# actually carries a DMG cannot fail that way, whatever the flags on any one release say.
+# Asked two ways, because neither alone is reliable.
+#
+# /releases/latest is the right question, and GitHub answers it correctly: not a draft, not a
+# prerelease, most recently published. It 404s when *every* release is a prerelease, which was the
+# state this project was in for its whole life and what made the app's update check go quiet. Only
+# a workflow_dispatch rehearsal is a prerelease now, so this is the ordinary path again.
+#
+# The list is the fallback, and the order GitHub returns it in must not be trusted. That order is
+# not newest-first and does not match id, created_at or published_at — asked today it puts v1.0.8
+# ahead of 1.0.9, 1.0.10 and 1.0.7. Taking the first DMG in the response is what installed 1.0.8
+# over 1.0.10 for anyone who ran this script. So the version is read out of each DMG's own
+# filename and the highest one wins, which relies on nothing GitHub promises.
+#
+# Parsed with grep and sed rather than jq, because jq is not on a stock Mac and this script has to
+# run on one.
 
-if [ -n "$VERSION" ]; then
-  API="https://api.github.com/repos/$REPO/releases/tags/$VERSION"
-else
-  API="https://api.github.com/repos/$REPO/releases?per_page=20"
-fi
+# `|| true` on the pipelines below: finding nothing is a normal outcome that the caller reports
+# properly. Without it, `set -e` and `pipefail` between them kill the script on an empty grep and
+# the user is left with a bare exit code and no idea why.
+dmg_urls() {
+  printf '%s' "$1" \
+    | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.dmg"' \
+    | sed 's/.*"\(https[^"]*\)"$/\1/' || true
+}
+
+# Highest version, not first in the response. `-n` with `p` drops any DMG whose name carries no
+# version rather than letting it sort to the top, and `sort -V` is what puts 1.0.10 above 1.0.9.
+newest_dmg() {
+  dmg_urls "$1" \
+    | sed -n 's|.*/[^/]*-\([0-9][0-9.]*\)-[^/]*\.dmg$|\1	&|p' \
+    | sort -t'	' -k1,1V \
+    | tail -1 \
+    | cut -f2- || true
+}
 
 step "Looking up the latest release"
-RELEASES="$(curl -fsSL -H 'Accept: application/vnd.github+json' "$API")" \
-  || die "Could not reach the GitHub releases API. Check your connection, or download the DMG by hand from https://github.com/$REPO/releases"
 
-# GitHub returns releases newest first, so the first DMG in the response is the newest one. Parsed
-# with grep rather than jq because jq is not on a stock Mac and this script must run on one.
-# `|| true` because finding nothing is a normal outcome that the next line reports properly.
-# Without it, `set -e` and `pipefail` between them kill the script on the empty grep and the user
-# is left with a bare exit code and no idea why.
-DMG_URL="$(printf '%s' "$RELEASES" \
-  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*\.dmg"' \
-  | head -1 \
-  | sed 's/.*"\(https[^"]*\)".*/\1/' || true)"
+if [ -n "$VERSION" ]; then
+  RELEASE="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/releases/tags/$VERSION")" \
+    || die "No release tagged $VERSION in $REPO. See https://github.com/$REPO/releases"
+  # One release, so there is nothing to choose between.
+  DMG_URL="$(dmg_urls "$RELEASE" | head -1 || true)"
+else
+  # No -S here, unlike everywhere else: a 404 from this one is the expected fallback, not a fault,
+  # and letting curl print "error: 404" before the script quietly recovers reads like a failure.
+  RELEASE="$(curl -fsL -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$REPO/releases/latest" || true)"
+  DMG_URL="$(newest_dmg "$RELEASE")"
+
+  if [ -z "$DMG_URL" ]; then
+    RELEASE="$(curl -fsSL -H 'Accept: application/vnd.github+json' \
+      "https://api.github.com/repos/$REPO/releases?per_page=100")" \
+      || die "Could not reach the GitHub releases API. Check your connection, or download the DMG by hand from https://github.com/$REPO/releases"
+    DMG_URL="$(newest_dmg "$RELEASE")"
+  fi
+fi
 
 [ -n "$DMG_URL" ] || die "No DMG found in the releases for $REPO${VERSION:+ at $VERSION}. See https://github.com/$REPO/releases"
 
-# Older releases predate the checksum file, so its absence is not an error.
-SUMS_URL="$(printf '%s' "$RELEASES" \
-  | grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*/SHA256SUMS"' \
-  | head -1 \
-  | sed 's/.*"\(https[^"]*\)".*/\1/' || true)"
+# Taken from the DMG's own release directory rather than searched for separately. A second search
+# over the list can return the SHA256SUMS of a *different* release, and then the filename lookup
+# below matches nothing and the download goes unverified without ever saying so. Older releases
+# predate the file, so its absence is still not an error.
+SUMS_URL="${DMG_URL%/*}/SHA256SUMS"
 
 DMG_FILE="$(basename "$DMG_URL")"
 
@@ -132,17 +165,21 @@ trap cleanup EXIT
 step "Downloading $DMG_FILE"
 curl -fL --progress-bar "$DMG_URL" -o "$WORK/$DMG_FILE" || die "Download failed."
 
-if [ -n "$SUMS_URL" ]; then
-  step "Checking the download"
-  # Verified against a file from the same server, so this is not a signature — it catches a
-  # truncated or corrupted download, which is the failure that actually happens on a 100 MB file.
-  if curl -fsSL "$SUMS_URL" -o "$WORK/SHA256SUMS"; then
-    EXPECTED="$(grep -F "$DMG_FILE" "$WORK/SHA256SUMS" | awk '{print $1}' | head -1 || true)"
-    ACTUAL="$(shasum -a 256 "$WORK/$DMG_FILE" | awk '{print $1}')"
-    if [ -n "$EXPECTED" ] && [ "$EXPECTED" != "$ACTUAL" ]; then
-      die "Checksum mismatch. Expected $EXPECTED, got $ACTUAL. The download is corrupt — try again."
-    fi
+step "Checking the download"
+# Verified against a file from the same server, so this is not a signature — it catches a
+# truncated or corrupted download, which is the failure that actually happens on a 100 MB file.
+# Skipping is said out loud both ways round: a check that quietly does nothing reads exactly like
+# one that passed.
+if curl -fsSL "$SUMS_URL" -o "$WORK/SHA256SUMS"; then
+  EXPECTED="$(grep -F "$DMG_FILE" "$WORK/SHA256SUMS" | awk '{print $1}' | head -1 || true)"
+  ACTUAL="$(shasum -a 256 "$WORK/$DMG_FILE" | awk '{print $1}')"
+  if [ -z "$EXPECTED" ]; then
+    echo "    SHA256SUMS has no entry for $DMG_FILE — not checked."
+  elif [ "$EXPECTED" != "$ACTUAL" ]; then
+    die "Checksum mismatch. Expected $EXPECTED, got $ACTUAL. The download is corrupt — try again."
   fi
+else
+  echo "    This release predates SHA256SUMS — not checked."
 fi
 
 # MARK: - Install

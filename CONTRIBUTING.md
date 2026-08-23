@@ -271,11 +271,12 @@ that only when the notary secrets are set too. With no certificate at all it fal
 and logs a workflow warning, because that build will cost its users their Accessibility
 permission.
 
-A `v*` tag is a finished release; everything else is a prerelease. Notarization deliberately does
-not enter into that decision — it decides whether Gatekeeper complains about the download, not
-whether the maintainer has finished the release. Tying the two together marked *every* release a
-prerelease, since there is no Apple Developer account here, and `/releases/latest` skips
-prereleases: the app's update check got a 404 and quietly reported "up to date" for ever.
+A `v*` tag is a finished release, and so is a merge to `main`; only a `workflow_dispatch` rehearsal
+is a prerelease, because that is a build nobody merged. Notarization deliberately does not enter
+into that decision — it decides whether Gatekeeper complains about the download, not whether the
+maintainer has finished the release. Tying the two together marked *every* release a prerelease,
+since there is no Apple Developer account here, and `/releases/latest` skips prereleases: the app's
+update check got a 404 and quietly reported "up to date" for ever.
 
 Nothing is deleted and no tag is ever reused, so pushing to `main` adds a build rather than
 replacing the one before it. Each tag carries the version and the commit, so it is unique per
@@ -287,12 +288,14 @@ without the Debug build noticing.
 
 ### Installing
 
-`scripts/install.sh` is the `curl | bash` in the README. It finds the newest release carrying a
-DMG — deliberately not `/releases/latest`, which skips prereleases and would therefore find
-nothing at all until this project is notarized — then copies the app into `/Applications` and
-clears `com.apple.quarantine`. That last step is the point of the script. macOS refuses to open an
-unnotarized download at all, claiming the app is damaged, and talking every user through
-`xattr -dr` by hand is not a distribution strategy.
+`scripts/install.sh` is the `curl | bash` in the README. It asks `/releases/latest`, and if that
+404s — which it does when every release is a prerelease, the state this project was in before
+merges to `main` became finished releases — it reads the list and takes the highest version out of
+the DMG filenames. Not the first entry: GitHub does not return that list newest first, and reading
+it positionally is what had `curl | bash` installing 1.0.8 while 1.0.10 was out. Then it copies the
+app into `/Applications` and clears `com.apple.quarantine`. That last step is the point of the
+script. macOS refuses to open an unnotarized download at all, claiming the app is damaged, and
+talking every user through `xattr -dr` by hand is not a distribution strategy.
 
 Keep it dependency-free. It has to run on a stock Mac, which means no `jq`, and Python cannot be
 assumed either. It parses the GitHub API with `grep`, and it is short enough to read before

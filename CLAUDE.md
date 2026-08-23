@@ -360,6 +360,20 @@ It now takes the first run of dot-separated digits, and requires the dot so `bui
 as version 7. **A tag shape that carries the version must survive `normalise`**; if you change how
 releases are tagged, change that with it.
 
+**GitHub does not return the releases list newest first.** `GET /releases` came back with `v1.0.8`
+ahead of 1.0.9, 1.0.10 and 1.0.7 — an order matching neither `id`, `created_at` nor `published_at`,
+and GitHub documents no order at all. `install.sh` took the first DMG in that response, so
+`curl | bash` installed 1.0.8 while `/releases/latest` correctly pointed at 1.0.10. It now asks
+`/releases/latest` first and, only if that 404s, reads the version out of each DMG's *filename* and
+takes the highest with `sort -V`. **Never read a GitHub releases list positionally.** And the same
+mistake in miniature: plain `sort` puts 1.0.9 above 1.0.10, so the `-V` is not decoration.
+
+The checksum had the matching bug. `SHA256SUMS` was found by its own separate search over the same
+response, so it could come from a different release than the DMG — and then the filename lookup
+found nothing, `EXPECTED` came out empty, and the check was skipped in silence. It is now derived
+from the DMG's own URL, and both skip paths say so out loud, because a check that quietly does
+nothing reads exactly like one that passed.
+
 The DMG is checked where it ships, not on the branch. `package.sh` exits zero on an image that is
 subtly wrong — an asset catalog that failed to compile leaves the app with no icon — so
 `release.yml` mounts the image and checks the app, the icon and the signature *before* Publish. A
