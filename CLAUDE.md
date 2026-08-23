@@ -138,12 +138,27 @@ combined paste, so a thirty-day history file never accumulates copies of the use
 **The clipboard placeholder is substituted last, and that ordering is the whole design.**
 `ClipboardContext.substituted` runs after rules *and* after the model, because the one thing the
 model must never see is the text it is about to reproduce — it rewords a stack trace, and
-`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×. The price is
-that the model sees the placeholder as ordinary words and can reword it, so a miss falls back to
-appending at the end rather than losing the clipboard. Match with
-`RuleRefiner.cachedWordRegex(for:)` — a hand-rolled `\b` here would fire inside Cyrillic — and
-escape the clipboard with `NSRegularExpression.escapedTemplate(for:)`, or a copied `$1` becomes a
-capture reference.
+`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×.
+
+**The model marks the spot; the rule fills it.** The placeholder is *spoken*, so it never arrives
+as the phrase the mode has on file: the recogniser writes "clipboard contents", the case ending
+changes in Russian, and the model rewords what is left. Matching it as text was always going to
+miss. So the model is asked, in `OnDeviceRefiner.prompt`, to put `ClipboardContext.marker` where
+the user asked for the clipboard — the judgement is the model's, the output is a literal, and the
+clipboard itself is still never shown. Ask for a character offset instead and you get a number a
+small model guessed at, four out, splitting a word.
+
+Three things hold that together. It is only *asked for* when `ClipboardContext.mentioned` says the
+transcript names the clipboard at all — the model decides where, never whether, or a sentence that
+never mentioned it gets the clipboard dropped into the middle of it. When no marker comes back —
+model off, mode with no instructions, model ignored the request — the spoken phrase is matched
+with `RuleRefiner.cachedInflectedRegex(for:)`, which allows each word three letters of ending, and
+a hand-rolled `\b` here would fire inside Cyrillic. And a marker with no clipboard behind it is
+taken back out by `removingMarker`, punctuation and all, rather than pasted as `[[CLIPBOARD]]`.
+
+Escape the clipboard with `NSRegularExpression.escapedTemplate(for:)` on the regex path, or a
+copied `$1` becomes a capture reference. The marker path is a plain string replacement and needs
+no escaping — which is one more reason to prefer it.
 
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.

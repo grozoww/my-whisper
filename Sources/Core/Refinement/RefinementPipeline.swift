@@ -49,6 +49,7 @@ final class RefinementPipeline {
             cleaned,
             instructions: mode.instructions,
             context: mode.usesClipboardContext ? clipboard.map(ClipboardContext.reference) : nil,
+            clipboardPlaceholder: placeholderToPlace(mode: mode, clipboard: clipboard, spoken: cleaned),
             timeout: .seconds(max(1, settings.modelTimeoutSeconds))
         )
 
@@ -67,6 +68,21 @@ final class RefinementPipeline {
 
         log.debug("Refined with the on-device model")
         return Result(text: final, usedModel: true)
+    }
+
+    /// The placeholder to ask the model to mark, or nil to not ask at all.
+    ///
+    /// Every condition here has to hold before the request goes in the prompt, and the last one is
+    /// the important one: the model is asked *where* the clipboard goes, never *whether* it was
+    /// asked for. Without that check a model that decided the sentence would read better with
+    /// something dropped into it would drop the clipboard mid-thought, and the end of the text —
+    /// where it lands with no placeholder at all — is the safer place to be wrong.
+    private func placeholderToPlace(mode: Mode, clipboard: String?, spoken: String) -> String? {
+        guard mode.pastesClipboard, let clipboard, !clipboard.isEmpty else { return nil }
+
+        let placeholder = mode.clipboardPlaceholder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ClipboardContext.mentioned(placeholder, in: spoken) else { return nil }
+        return placeholder
     }
 }
 
