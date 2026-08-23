@@ -181,10 +181,15 @@ private struct SettingsRowLayout: Layout {
         return plan
     }
 
+    /// One measurement, not two. `dimensions(in:)` already carries the size the subview would
+    /// take, so asking `sizeThatFits` for the same proposal measures everything a second time —
+    /// which made this the single most expensive thing on the main thread while a settings screen
+    /// was being built.
     private func measure(_ subview: LayoutSubviews.Element, proposal: ProposedViewSize) -> Measured {
-        Measured(
-            size: subview.sizeThatFits(proposal),
-            baseline: subview.dimensions(in: proposal)[.firstTextBaseline],
+        let dimensions = subview.dimensions(in: proposal)
+        return Measured(
+            size: CGSize(width: dimensions.width, height: dimensions.height),
+            baseline: dimensions[.firstTextBaseline],
             proposal: proposal
         )
     }
@@ -224,7 +229,11 @@ struct SettingsPage<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
+            // Lazy, so opening a screen builds only the sections that are actually on screen.
+            // A settings page is a dozen sections of pickers and switches, and a `Picker` is
+            // expensive to build; building all of them up front is what made switching sidebar
+            // rows take a quarter of a second before anything appeared.
+            LazyVStack(alignment: .leading, spacing: 22) {
                 content
             }
             .padding(24)

@@ -262,17 +262,24 @@ first thing anyone asks when a download misbehaves.
 | Trigger | Tag | Name |
 | --- | --- | --- |
 | Pull request | — | A DMG as a CI artifact. Nothing published. |
-| Push to `main` | `latest`, a rolling prerelease replaced each time | `release-1.0.3-a1b2c3d` |
+| Push to `main` | `release-1.0.3-a1b2c3d`, a prerelease of its own | `release-1.0.3-a1b2c3d` |
 | Push a tag `v*` | the tag. Notarized if the signing secrets are set | `release-1.0.3-a1b2c3d` |
 | Actions → Run workflow | `build-<n>`, with an "unsigned" checkbox for rehearsing | `release-1.0.3-a1b2c3d (build 7)` |
 
 `.github/workflows/release.yml` signs whenever `MACOS_CERTIFICATE` is set, and notarizes on top of
 that only when the notary secrets are set too. With no certificate at all it falls back to ad-hoc
 and logs a workflow warning, because that build will cost its users their Accessibility
-permission. Anything that is not a notarized tag is marked a prerelease, so
-GitHub keeps pointing people at the newest real release. The rolling release is deleted and
-recreated on each push rather than added to — reusing the tag would otherwise leave two DMGs
-attached to it once the version number changes, and `install.sh` takes the first one it finds.
+permission.
+
+A `v*` tag is a finished release; everything else is a prerelease. Notarization deliberately does
+not enter into that decision — it decides whether Gatekeeper complains about the download, not
+whether the maintainer has finished the release. Tying the two together marked *every* release a
+prerelease, since there is no Apple Developer account here, and `/releases/latest` skips
+prereleases: the app's update check got a 404 and quietly reported "up to date" for ever.
+
+Nothing is deleted and no tag is ever reused, so pushing to `main` adds a build rather than
+replacing the one before it. Each tag carries the version and the commit, so it is unique per
+commit and exactly one DMG is ever attached to it.
 
 The DMG job in `ci.yml` exists because the Release build is not the Debug build: it signs, it
 hardens the runtime, it compiles the asset catalog and it is arm64-only. Each of those has broken

@@ -265,7 +265,12 @@ struct ConfigurationView: View {
 /// Re-read on appear so a change made in System Settings shows up here.
 private struct StartupSection: View {
     @State private var isEnabled = false
-    @State private var status = LaunchAtLogin.status
+    /// Starts at a placeholder and is filled in on appear. A `@State` default is an ordinary
+    /// expression: it is evaluated every time this struct is built — which is every time anything
+    /// on the Configuration screen changes — even though SwiftUI keeps only the first result. With
+    /// `LaunchAtLogin.status` there, flipping any switch on the screen cost an XPC round trip to
+    /// the background task daemon.
+    @State private var status: SMAppService.Status = .notRegistered
     /// Why the last attempt did not take. Nil until something actually fails.
     @State private var failure: String?
 
