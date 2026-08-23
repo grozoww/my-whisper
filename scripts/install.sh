@@ -84,10 +84,10 @@ command -v curl >/dev/null 2>&1 || die "curl is required."
 
 # MARK: - Find the download
 #
-# Not /releases/latest: that endpoint skips prereleases, and every build published without an
-# Apple Developer account is marked as one. Asking for the list and taking the newest release that
-# actually carries a DMG is what makes this work before the project is notarized — and it keeps
-# working unchanged afterwards.
+# Not /releases/latest: that endpoint skips prereleases, and answers 404 rather than nothing when
+# every release is one — which is the state this project was in for its whole life, and it is what
+# made the app's update check go quiet. Asking for the list and taking the newest release that
+# actually carries a DMG cannot fail that way, whatever the flags on any one release say.
 
 if [ -n "$VERSION" ]; then
   API="https://api.github.com/repos/$REPO/releases/tags/$VERSION"

@@ -30,11 +30,12 @@ final class UpdateChecker {
 
     /// The list of releases, newest first — deliberately *not* `/releases/latest`.
     ///
-    /// That endpoint only ever answers with a release GitHub itself considers the latest, which
-    /// means it skips prereleases. There is no Apple Developer account behind this project, so
-    /// every build published before a version tag is cut is marked a prerelease — and the endpoint
-    /// therefore answered 404, which this type reads as "up to date". The check was silently
-    /// finding nothing, for ever. `scripts/install.sh` reads this same list for the same reason.
+    /// That endpoint only ever answers with the one release GitHub itself considers latest, and it
+    /// skips prereleases entirely. Every release used to be marked a prerelease, so it answered
+    /// 404 and this type read that as "up to date" — the check found nothing, for ever. A build
+    /// from main is a finished release now, but a rehearsal run is still a prerelease, so reading
+    /// the list and taking the newest finished entry stays the answer that cannot go quiet on us.
+    /// `scripts/install.sh` reads this same list for the same reason.
     ///
     /// No query string, so the request stays something anyone can verify says nothing about them —
     /// see `sendsNothingIdentifying`. GitHub's default page of 30 is far more than enough.
@@ -89,9 +90,9 @@ final class UpdateChecker {
                 throw HTTPError.malformedResponse("the releases list was not JSON")
             }
 
-            // A readable list with nothing finished in it is an ordinary state — every release so
-            // far is a prerelease — and not the same thing as a response we could not read. Only
-            // the latter is worth telling the user about.
+            // A readable list with nothing finished in it is an ordinary state — a repository
+            // whose only builds are rehearsals — and not the same thing as a response we could not
+            // read. Only the latter is worth telling the user about.
             guard let release = Self.newestFinishedRelease(in: json) else {
                 state = .upToDate(checkedAt: Date())
                 log.info("Update check: no finished release published yet")
@@ -155,11 +156,23 @@ final class UpdateChecker {
         )
     }
 
-    /// Strips a leading `v` and anything after the numbers, so `v1.2.3` and `1.2.3` compare equal.
+    /// The version numbers a tag carries, whatever else is wrapped around them.
+    ///
+    /// Tags come in two shapes here: `v1.2.3` for a version someone cut, and
+    /// `release-1.2.3-a1b2c3d` for a build from main — and the second one is what almost everybody
+    /// is actually running. Stripping a leading `v` handled the first and left the second with a
+    /// word in front of the numbers, which `components` reads as no version at all. 1.0.8 then
+    /// compared as 0.0.0, and nobody was ever offered an update. Taking the first run of
+    /// dot-separated digits handles both shapes and the `-<sha>` on the end at the same time.
+    ///
+    /// A dot is required, so `build-7` — what a rehearsal run is tagged — does not read as version
+    /// 7 and leapfrog every real release.
     nonisolated static func normalise(_ tag: String) -> String {
-        var value = tag.trimmingCharacters(in: .whitespaces)
-        if value.hasPrefix("v") || value.hasPrefix("V") { value.removeFirst() }
-        return value
+        let value = tag.trimmingCharacters(in: .whitespaces)
+        guard let numbers = value.range(of: #"\d+(\.\d+)+"#, options: .regularExpression) else {
+            return value
+        }
+        return String(value[numbers])
     }
 
     /// Numeric component-wise comparison.

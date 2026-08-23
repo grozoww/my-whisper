@@ -330,10 +330,22 @@ the Accessibility grant alive across updates, and treating the two as one flag i
 release ad-hoc. The same mistake one level up is what broke the update check: every release was
 marked a prerelease because none was notarized, `/releases/latest` skips prereleases, and the app
 read the resulting 404 as "up to date". Notarization decides whether Gatekeeper complains, not
-whether a release is finished — a `v*` tag is what decides that. A pull request builds and tests
-but does not package; a push to main adds a prerelease of its own, tagged
-`release-<version>-<short sha>` so nothing is ever replaced; a tag cuts a versioned release. Every
-one of them is *named* `release-<version>-<short sha>`.
+whether a release is finished — merging to main is what decides that.
+
+**Merging to main publishes a finished release, and it becomes the latest.** A pull request builds
+and tests but does not package; a push to main packages and publishes, tagged
+`release-<version>-<short sha>` so nothing is ever replaced; a `v*` tag does the same under its own
+tag. Only a `workflow_dispatch` rehearsal is a prerelease, because that is a build nobody merged.
+Every one of them is *named* `release-<version>-<short sha>`. Marking the main builds prereleases
+is what kept the update check silent for the project's whole life: `UpdateChecker` skips
+prereleases, no `v*` tag was ever cut, and so there was never anything for it to find.
+
+The other half of that failure was in the tag itself. `UpdateChecker.normalise` stripped a leading
+`v` and nothing else, so `release-1.0.8-71f957b` came out with a word in front of the numbers and
+compared as 0.0.0 — the newest release read as older than whatever the user was already running.
+It now takes the first run of dot-separated digits, and requires the dot so `build-7` does not read
+as version 7. **A tag shape that carries the version must survive `normalise`**; if you change how
+releases are tagged, change that with it.
 
 The DMG is checked where it ships, not on the branch. `package.sh` exits zero on an image that is
 subtly wrong — an asset catalog that failed to compile leaves the app with no icon — so

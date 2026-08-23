@@ -20,6 +20,22 @@ struct UpdateCheckerTests {
         #expect(UpdateChecker.isVersion(candidate, newerThan: current) == expected)
     }
 
+    @Test("A build-from-main tag compares as the version it carries")
+    func comparesBuildFromMainTag() {
+        // `release-1.0.8-71f957b` is the tag almost every shipped build has. It used to parse as
+        // no version at all — 1.0.8 compared as 0.0.0 — so the newest release on offer read as
+        // older than whatever the user was already running.
+        #expect(UpdateChecker.isVersion("release-1.0.8-71f957b", newerThan: "1.0.5"))
+        #expect(!UpdateChecker.isVersion("release-1.0.5-5201edd", newerThan: "1.0.8"))
+    }
+
+    @Test("A tag with no version in it never reads as newer", arguments: ["build-7", "latest", "main"])
+    func tagWithoutAVersion(tag: String) {
+        // A rehearsal run is tagged `build-<run number>`. Reading that 7 as a major version would
+        // offer everyone version 7 and hand them a downgrade.
+        #expect(!UpdateChecker.isVersion(tag, newerThan: "1.0.5"))
+    }
+
     @Test("A pre-release suffix does not make a version newer")
     func ignoresPreReleaseSuffix() {
         // 1.0.0-beta.1 and 1.0.0 must not read as an upgrade in either direction here; the
@@ -60,6 +76,12 @@ struct UpdateCheckerTests {
         #expect(release.publishedAt != nil)
     }
 
+    @Test("A build from main parses to the version in its tag")
+    func parsesBuildFromMainTag() throws {
+        let release = try #require(UpdateChecker.parse(releaseJSON(["tag_name": "release-1.0.8-71f957b"])))
+        #expect(release.version == "1.0.8")
+    }
+
     @Test("Drafts and pre-releases are not offered", arguments: ["draft", "prerelease"])
     func rejectsUnfinishedReleases(flag: String) {
         // Someone running the shipped app should never be nudged onto a build the maintainer has
@@ -75,9 +97,8 @@ struct UpdateCheckerTests {
 
     @Test("The newest finished release in the list is the one offered")
     func picksNewestFinishedRelease() throws {
-        // Every build published before a version tag is cut is a prerelease, and they sort ahead
-        // of the real release. Taking the first entry regardless is what would offer everyone a
-        // half-finished build from main.
+        // A rehearsal build is a prerelease and sorts ahead of the finished releases. Taking the
+        // first entry regardless is what would offer everyone a build nobody merged.
         let data = releaseListJSON([
             release(["tag_name": "release-1.0.9-abc1234", "prerelease": true]),
             release(["tag_name": "v1.0.8", "draft": true]),
@@ -100,8 +121,8 @@ struct UpdateCheckerTests {
     @Test("A repository whose every release is a prerelease reads as up to date, not as an error")
     @MainActor
     func treatsUnfinishedReleasesAsUpToDate() async {
-        // This is the state the project is actually in until a version tag is cut. Reporting it
-        // as a failure — or as "no usable tag_name" — is what made the Check button look broken.
+        // A repository whose only builds are rehearsals. Reporting that as a failure — or as
+        // "no usable tag_name" — is what made the Check button look broken.
         let data = releaseListJSON([release(["tag_name": "release-99.0.0-abc1234", "prerelease": true])])
         let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: data))])
         let checker = UpdateChecker(http: stub)
