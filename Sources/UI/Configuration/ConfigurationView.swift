@@ -79,6 +79,21 @@ struct ConfigurationView: View {
                 )
                 RowDivider()
                 SettingsRow(
+                    symbol: "timer",
+                    title: "Wait before hold-to-talk starts",
+                    detail: "macOS claims a tap of fn for switching language and the emoji picker. A wait lets a tap go to macOS and a hold come to us. Only applies to a single modifier; a key combination always starts at once."
+                ) {
+                    Picker("Delay", selection: $settings.settings.dictation.pushToTalkHoldDelay) {
+                        Text("Start at once").tag(0.0)
+                        Text("0.5 seconds").tag(0.5)
+                        Text("1 second").tag(1.0)
+                        Text("1.5 seconds").tag(1.5)
+                        Text("2 seconds").tag(2.0)
+                    }
+                    .frame(width: 190)
+                }
+                RowDivider()
+                SettingsRow(
                     symbol: "escape",
                     title: "Cancel a recording",
                     detail: "Escape, while recording. The audio is discarded and nothing is pasted."

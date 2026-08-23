@@ -13,7 +13,7 @@ import OSLog
 /// callback takes too long, and it dies silently when Accessibility is revoked.
 @MainActor
 final class HotkeyMonitor {
-    enum Event: Sendable {
+    enum Event: Sendable, Equatable {
         case toggle
         case pressStart
         case pressEnd
@@ -35,6 +35,11 @@ final class HotkeyMonitor {
     private var toggleChord: HotkeyChord?
     private var pushToTalkChord: HotkeyChord?
 
+    /// How long a modifier-only push-to-talk chord must be held before it counts, and the timer
+    /// counting it. See `DictationSettings.pushToTalkHoldDelay` for why the wait exists.
+    private var pushToTalkHoldDelay: Duration = .zero
+    private var pendingPressStart: Task<Void, Never>?
+
     /// Whether the modifier-only chord was already fully held on the previous event. Without this
     /// every extra `flagsChanged` while the chord is held would re-fire the hotkey.
     private var toggleChordEngaged = false
@@ -44,9 +49,12 @@ final class HotkeyMonitor {
 
     // MARK: - Lifecycle
 
-    func configure(toggle: HotkeyChord?, pushToTalk: HotkeyChord?) {
+    func configure(toggle: HotkeyChord?, pushToTalk: HotkeyChord?, holdDelay: Duration = .zero) {
         toggleChord = toggle
         pushToTalkChord = pushToTalk
+        pushToTalkHoldDelay = holdDelay
+        // A rebind mid-hold would otherwise fire a press for a chord that is no longer bound.
+        cancelPendingPressStart()
     }
 
     /// Installs the tap. Returns false when Accessibility is missing, which is the only common
@@ -104,6 +112,7 @@ final class HotkeyMonitor {
         isArmed = false
         toggleChordEngaged = false
         pushToTalkEngaged = false
+        cancelPendingPressStart()
     }
 
     // MARK: - Event handling
@@ -124,12 +133,14 @@ final class HotkeyMonitor {
         return decision == .consume ? nil : Unmanaged.passUnretained(event)
     }
 
-    private enum Decision {
+    enum Decision {
         case pass
         case consume
     }
 
-    private func decide(type: CGEventType, keyCode: CGKeyCode, flags: CGEventFlags) -> Decision {
+    /// Internal rather than private so the hold-delay timing can be driven from a test: arming a
+    /// real tap needs Accessibility, which the test suite deliberately does not have.
+    func decide(type: CGEventType, keyCode: CGKeyCode, flags: CGEventFlags) -> Decision {
         switch type {
         case .tapDisabledByTimeout, .tapDisabledByUserInput:
             // macOS switched us off. Re-enabling is the documented recovery, and without it the
@@ -155,12 +166,16 @@ final class HotkeyMonitor {
     private func handleFlagsChanged(_ flags: CGEventFlags) -> Decision {
         if let chord = pushToTalkChord, chord.isModifierOnly {
             let satisfied = chord.isSatisfied(by: flags)
-            if satisfied, !pushToTalkEngaged {
-                pushToTalkEngaged = true
-                onEvent?(.pressStart)
-            } else if !satisfied, pushToTalkEngaged {
-                pushToTalkEngaged = false
-                onEvent?(.pressEnd)
+            if satisfied, !pushToTalkEngaged, pendingPressStart == nil {
+                beginPressStart()
+            } else if !satisfied {
+                // Released before the hold delay elapsed: the tap belonged to whatever else the
+                // key means — switching input source, on fn — and we never started at all.
+                cancelPendingPressStart()
+                if pushToTalkEngaged {
+                    pushToTalkEngaged = false
+                    onEvent?(.pressEnd)
+                }
             }
         }
 
@@ -203,6 +218,31 @@ final class HotkeyMonitor {
         }
 
         return .pass
+    }
+
+    /// Fires the press now, or arms the timer that will. The timer is a `Task` rather than work
+    /// inside the tap callback on purpose: a slow callback is what makes macOS disable the tap.
+    private func beginPressStart() {
+        guard pushToTalkHoldDelay > .zero else {
+            pushToTalkEngaged = true
+            onEvent?(.pressStart)
+            return
+        }
+        let delay = pushToTalkHoldDelay
+        pendingPressStart = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            // `Task.sleep` throws on cancellation and `try?` swallows it, so the check has to be
+            // explicit or a released key would still start a recording.
+            guard !Task.isCancelled, let self else { return }
+            self.pendingPressStart = nil
+            self.pushToTalkEngaged = true
+            self.onEvent?(.pressStart)
+        }
+    }
+
+    private func cancelPendingPressStart() {
+        pendingPressStart?.cancel()
+        pendingPressStart = nil
     }
 
     private func handleKeyUp(keyCode: CGKeyCode) -> Decision {

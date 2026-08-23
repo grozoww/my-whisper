@@ -60,6 +60,7 @@ the optional cloud provider instead.
 ## Features
 
 - **Global hotkey** — toggle, or push-to-talk. Text is pasted into the focused field of any app.
+  Hold-to-talk waits a second by default, so a tap of fn still switches your keyboard language.
 - **Fully offline by default** — Parakeet for speech, on-device cleanup. Zero API keys, zero
   accounts, and nothing to download beyond the speech model.
 - **Modes** — per-profile prompts that clean up the raw transcript: drop `mm` and `hmm`, resolve

@@ -19,12 +19,18 @@ struct PillView: View {
         .frame(height: 44)
         .frame(minWidth: 108)
         .background {
-            Capsule(style: .continuous)
-                .fill(.black.opacity(0.82))
-                .overlay {
-                    Capsule(style: .continuous)
-                        .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+            ZStack {
+                Capsule(style: .continuous)
+                    .fill(.black.opacity(0.82))
+                if model.phase.isProcessing {
+                    // Clipped rather than masked so the sweep stops at the fill and leaves the
+                    // border below to draw the edge at full strength.
+                    ProcessingSweep()
+                        .clipShape(Capsule(style: .continuous))
                 }
+                Capsule(style: .continuous)
+                    .strokeBorder(.white.opacity(model.phase.isProcessing ? 0.22 : 0.12), lineWidth: 1)
+            }
         }
         .shadow(color: .black.opacity(0.35), radius: 14, y: 5)
         .padding(Self.shadowMargin)
@@ -77,21 +83,49 @@ private struct AudioBars: View {
     }
 }
 
+/// A band of light crossing the capsule while the app is transcribing or cleaning up.
+///
+/// Those two stages have nothing to show — no audio bars, no text yet — and a still pill during a
+/// slow on-device model reads as a hang. The sweep is one animated `offset`, so Core Animation
+/// runs it off the main thread and it costs nothing while the model works.
+private struct ProcessingSweep: View {
+    @State private var travelled = false
+
+    /// How much of the capsule the band covers. Wide enough to be a wash of light rather than a
+    /// stripe, which would read as a loading bar and promise progress this cannot know.
+    private static let bandFraction: CGFloat = 0.55
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let band = width * Self.bandFraction
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.18), .clear],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: band)
+            .offset(x: travelled ? width : -band)
+            .animation(.linear(duration: 1.1).repeatForever(autoreverses: false), value: travelled)
+            .onAppear { travelled = true }
+        }
+    }
+}
+
 private struct BusyLabel: View {
     let text: String
     let symbol: String
-    @State private var pulsing = false
 
     var body: some View {
         HStack(spacing: 7) {
             Image(systemName: symbol)
-                .opacity(pulsing ? 0.4 : 1)
-                .animation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true), value: pulsing)
+                // The symbol's own layers cycle rather than the whole glyph fading. Fading it out
+                // made the pill look like it was dismissing itself half the time.
+                .symbolEffect(.variableColor.iterative.dimInactiveLayers, options: .repeating)
             Text(text)
         }
         .font(.system(size: 13, weight: .medium))
         .foregroundStyle(.white)
-        .onAppear { pulsing = true }
     }
 }
 

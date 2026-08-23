@@ -98,15 +98,20 @@ final class DictationController {
     func applySettings() {
         let dictation = settings.settings.dictation
         let pushToTalk = dictation.pushToTalkChord.flatMap { $0.isEmpty ? nil : $0 }
+        let holdDelay = Duration.milliseconds(Int(dictation.pushToTalkHoldDelay * 1000))
 
         switch dictation.hotkeyMode {
         case .toggle:
             // Both are live at once. Someone who set a push-to-talk key expects it to work without
             // also having to change a mode picker.
-            hotkeys.configure(toggle: dictation.toggleChord, pushToTalk: pushToTalk)
+            hotkeys.configure(toggle: dictation.toggleChord, pushToTalk: pushToTalk, holdDelay: holdDelay)
         case .pushToTalk:
             // The main chord holds rather than toggles, so nothing stays bound to toggle.
-            hotkeys.configure(toggle: nil, pushToTalk: pushToTalk ?? dictation.toggleChord)
+            hotkeys.configure(
+                toggle: nil,
+                pushToTalk: pushToTalk ?? dictation.toggleChord,
+                holdDelay: holdDelay
+            )
         }
     }
 

@@ -49,6 +49,14 @@ struct DictationSettings: Codable, Equatable, Sendable {
     /// Defaults to fn: it sits under your thumb, collides with nothing, and holding it has no
     /// meaning of its own. Bound alongside the toggle chord, so both work at once.
     var pushToTalkChord: HotkeyChord? = .fn
+    /// How long a modifier-only hold key has to be down before recording starts, in seconds.
+    ///
+    /// fn is the default hold key and macOS also claims a *tap* of it — switching input source,
+    /// opening the emoji picker — so a tap has to mean nothing to us or the two gestures fight
+    /// over the same key. A tap is over in well under a second; a hold is not. Zero starts
+    /// immediately. Only modifier-only keys wait: a bound key combination is swallowed anyway,
+    /// so nothing is competing for it and a delay would be pure lag.
+    var pushToTalkHoldDelay: Double = 1.0
     /// Soniox model id. Configurable so a provider-side rename does not need an app release.
     var sonioxModel: String = "stt-async-preview"
 }
@@ -117,6 +125,7 @@ extension DictationSettings {
         hotkeyMode = container.value(.hotkeyMode, or: defaults.hotkeyMode)
         toggleChord = container.value(.toggleChord, or: defaults.toggleChord)
         pushToTalkChord = container.optional(.pushToTalkChord, defaultWhenAbsent: defaults.pushToTalkChord)
+        pushToTalkHoldDelay = container.value(.pushToTalkHoldDelay, or: defaults.pushToTalkHoldDelay)
         sonioxModel = container.value(.sonioxModel, or: defaults.sonioxModel)
     }
 }
