@@ -25,17 +25,31 @@ final class PermissionsManager {
     private(set) var accessibility: Status = .notDetermined
 
     private var pollTask: Task<Void, Never>?
+    private var activationObserver: (any NSObjectProtocol)?
 
     var allGranted: Bool { microphone.isGranted && accessibility.isGranted }
 
     // MARK: - Reading
 
     func refresh() {
-        microphone = Self.microphoneStatus()
-        // `AXIsProcessTrustedWithOptions(nil)` rather than `AXIsProcessTrusted()`: the latter is
-        // documented to cache within a process on some releases, which is exactly the "I granted
-        // it and the app still says I did not" report this poll exists to prevent.
-        accessibility = AXIsProcessTrustedWithOptions(nil) ? .granted : .denied
+        set(microphone: Self.microphoneStatus())
+        refreshAccessibility()
+    }
+
+    /// The cheap half, and the only one worth asking for twice a second.
+    ///
+    /// `AXIsProcessTrustedWithOptions(nil)` rather than `AXIsProcessTrusted()`: the latter is
+    /// documented to cache within a process on some releases, which is exactly the "I granted it
+    /// and the app still says I did not" report this poll exists to prevent.
+    private func refreshAccessibility() {
+        let granted: Status = AXIsProcessTrustedWithOptions(nil) ? .granted : .denied
+        // `@Observable` publishes a write whether or not the value changed, so writing the same
+        // answer every two seconds would invalidate every view watching this — for ever.
+        if accessibility != granted { accessibility = granted }
+    }
+
+    private func set(microphone status: Status) {
+        if microphone != status { microphone = status }
     }
 
     /// The bundle macOS is actually deciding about.
@@ -85,20 +99,38 @@ final class PermissionsManager {
     /// Accessibility can be revoked in System Settings while we run, and the app gets no
     /// notification. A 2-second poll is cheap and is the difference between a clear warning and
     /// dictation mysteriously doing nothing.
+    ///
+    /// The microphone is deliberately *not* in the poll. `AVCaptureDevice.authorizationStatus` is
+    /// around 13 ms on the main thread, so asking every two seconds forever is a periodic stutter
+    /// in a menu bar app that is meant to be invisible. It can only change in System Settings, and
+    /// coming back from System Settings means activating this app — so that is when it is re-read.
     func beginMonitoring() {
         guard pollTask == nil else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 guard let self else { return }
-                self.refresh()
+                self.refreshAccessibility()
             }
+        }
+
+        guard activationObserver == nil else { return }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.set(microphone: Self.microphoneStatus()) }
         }
     }
 
     func stopMonitoring() {
         pollTask?.cancel()
         pollTask = nil
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
+            self.activationObserver = nil
+        }
     }
 
     // MARK: - Requesting

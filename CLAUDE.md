@@ -218,6 +218,13 @@ Both workflows pass `fetch-depth: 0` for that reason. Major and minor stay a han
 an app that reports an older version than the release it came from, and `UpdateChecker` then
 offers every user an update to what they are already running.
 
+**A settings screen is built eagerly unless you say otherwise.** `SettingsPage` puts its sections
+in a `LazyVStack`, not a `VStack`, so opening a screen builds only what is on display. A `Picker` is
+about 6 ms to build and Configuration has seven of them; building the whole page up front is what
+made switching sidebar rows take ~240 ms before anything appeared, against ~135 ms now. The rest of
+that is SwiftUI tearing down one screen and building the next, which is what a `switch` in
+`RootView.detail` means — measure before assuming one screen is at fault.
+
 **`ViewThatFits` builds every candidate, and a settings page is one view.** Both halves matter
 together. `SettingsRow` used to state its two arrangements as `ViewThatFits { sideBySide;
 stacked }`, which is the clearest way to write it and meant every row built two copies of its
@@ -225,15 +232,36 @@ control — a `Picker` is expensive to build. And because a whole settings scree
 SwiftUI view reading one observed `Settings` value, flipping any switch re-renders every row on
 it. Measured: 105 ms per change on Configuration, which is a toggle animating at about five
 frames a second. `SettingsRowLayout` measures each subview once instead, and the same change now
-costs 23 ms. If a screen ever feels slow again, measure a re-render before guessing — render
-`RootView` in a test, change an observed value, and time `layoutSubtreeIfNeeded`.
+costs 23 ms — one `dimensions(in:)` call per subview, which already carries the size, rather than
+that *and* `sizeThatFits` for the same proposal.
 
-**Nothing in a SwiftUI body may ask the system a question.** `LaunchAtLogin.status` is an XPC
-round trip to the background task daemon (~3 ms) and `KeychainStore.has` is one to securityd; both
-were being read from `body`, where they ran several times per render. Read them into `@State` on
-appear and refresh them when something changes them. The same goes for `AudioDevices.inputs()`,
-which costs ~65 ms — `SoundView` already loads it in a `.task`, and `AppState.inputDeviceName`
-only calls it when the user has pinned a device.
+If a screen ever feels slow again, measure it in the real app rather than in a test. `AppState.start`
+returns early under XCTest, so a test host never runs the event tap, the model load or the permission
+poll, and it reported roughly half the cost the shipped app actually pays. Add a temporary probe
+behind an environment variable that changes state and waits for `CFRunLoopActivity.beforeWaiting`,
+then run `sample` against the process while it churns. Release is not faster than Debug here — that
+was measured — so a slow screen is a real defect, not a build-configuration artefact.
+
+**Nothing in a SwiftUI body may ask the system a question — and a `@State` default is in the
+body.** `LaunchAtLogin.status` is an XPC round trip to the background task daemon (~3 ms) and
+`KeychainStore.has` is one to securityd; both were being read from `body`, where they ran several
+times per render. Read them into `@State` on appear and refresh them when something changes them.
+The same goes for `AudioDevices.inputs()`, which costs ~65 ms — `SoundView` already loads it in a
+`.task`, and `AppState.inputDeviceName` only calls it when the user has pinned a device.
+
+The half of that rule which is easy to miss is `@State private var status = LaunchAtLogin.status`.
+A property's default is an ordinary expression, evaluated every time the struct is built even
+though SwiftUI keeps only the first result — and a settings screen is one view, so it is rebuilt
+whenever anything on it changes. That one line was 94% of the time spent evaluating
+`ConfigurationView.body`, and it is why flipping a switch cost 19 ms rather than 10. Give `@State` a
+cheap literal and fill it in from `.onAppear` or `.task`.
+
+Polling counts too. `PermissionsManager` used to read `AVCaptureDevice.authorizationStatus` — about
+13 ms on the main thread — every two seconds for the life of the process. Accessibility is the one
+that has to be polled, because macOS never says it changed; the microphone can only change in
+System Settings, so it is re-read when the app is activated instead. And because `@Observable`
+publishes a write whether or not the value changed, a poll that writes the same answer back
+invalidates every view watching it: compare before assigning.
 
 **`SMAppService` reports `.notFound` for an app that has simply never registered.** It does not
 mean the app is in the wrong place. The login-item switch used to disable itself on that status
