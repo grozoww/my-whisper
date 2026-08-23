@@ -19,8 +19,8 @@
 // downsampled to 16 pixels turns to mush; drawn natively at 16 it stays a shape.
 //
 // The mark: a frog's face, flat and hand-inked, whose mouth is one unbroken stroke that starts as
-// a wave on the left and settles into a straight line on the right — speech going in ragged, text
-// coming out clean. Deliberately not a microphone. A microphone says "recording", and what this
+// a wave on the left and settles, over the whole right half, into a line — speech going in ragged,
+// text coming out clean. Deliberately not a microphone. A microphone says "recording", and what this
 // app does with the recording is the interesting part. The frog is the one who listens.
 
 import AppKit
@@ -68,7 +68,6 @@ private struct Face {
     let nostrils: [(start: CGPoint, curve: Curve)]
     let mouthStart: CGPoint
     let mouthCurves: [Curve]
-    let mouthEnd: CGPoint
     let headLine: CGFloat
     let eyeLine: CGFloat
     let nostrilLine: CGFloat
@@ -79,6 +78,113 @@ private func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x, y: y) 
 private func curve(_ c1x: CGFloat, _ c1y: CGFloat, _ c2x: CGFloat, _ c2y: CGFloat, _ x: CGFloat, _ y: CGFloat) -> Face.Curve {
     Face.Curve(to: point(x, y), c1: point(c1x, c1y), c2: point(c2x, c2y))
 }
+
+/// The mouth: a wave that swells, fades, and runs out into a long, almost level line.
+///
+/// It is one function of x sampled into cubics, not a run of hand-placed arcs, and that is the
+/// whole point of it. Every earlier version chained one cubic per lobe, and two neighbouring cubics
+/// only meet smoothly when their amplitudes and widths are in the same ratio — which a wave whose
+/// entire subject is *changing* amplitude can never satisfy. So there was a small corner at every
+/// zero crossing, and the one where the wave met the straight line was merely the worst of them,
+/// because the line's slope was zero and the last lobe's was not. Fixing that one join by hand only
+/// moved the problem along; the shape had to stop being a chain.
+///
+/// A sampled function has no joins to match. `curves` walks the mouth, takes the slope at each
+/// sample, and hands the *same* slope to the segment on either side of it, so the stroke is smooth
+/// by construction from the left cheek to the right. Wave, fade and flat run are one curve.
+private struct Mouth {
+    /// Left cheek to right cheek. Every face currently gives both the same height, so the line
+    /// finishes exactly where the wave set out and the mouth reads level across the face. The two
+    /// are kept separate anyway because they were not always equal: an earlier mouth needed a degree
+    /// of lift to stop a dead-level line reading as a second stroke butted onto the wave, and that
+    /// is a real hazard whenever the fade is not smooth. This one's is, so it does not need the
+    /// trick. If a height ever differs again, the centre line *eases* between the two rather than
+    /// tilting — the stroke leaves one cheek and arrives at the other level, with the angle in the
+    /// middle where the wave is not.
+    let start: CGPoint
+    let end: CGPoint
+
+    /// The tallest crest, measured off the centre line.
+    let amplitude: CGFloat
+
+    /// Full waves before the envelope closes — two lobes to a cycle.
+    let cycles: CGFloat
+
+    /// How much of the mouth the wave gets before it has faded to nothing. The rest is the line.
+    let span: CGFloat
+
+    /// The envelope, `t^onset * (1 - t)^decay` normalised to peak at 1. `onset` under 1 brings the
+    /// first crest in already half grown; over 1 starts it smaller and peaks later. `decay` above 2
+    /// lands the fade with its slope *and* its bend already at zero, which is what lets the wave
+    /// disappear into the line rather than stop at it.
+    let onset: CGFloat
+    let decay: CGFloat
+}
+
+extension Mouth {
+    private var envelopePeak: CGFloat {
+        let t = onset / (onset + decay)
+        return pow(t, onset) * pow(1 - t, decay)
+    }
+
+    /// The height of the stroke a fraction `u` of the way along the mouth.
+    private func height(at u: CGFloat) -> CGFloat {
+        let centre = start.y + (end.y - start.y) * (u * u * (3 - 2 * u))
+        guard u < span else { return centre }
+        let t = u / span
+        let envelope = pow(t, onset) * pow(1 - t, decay) / envelopePeak
+        return centre - amplitude * envelope * sin(2 * .pi * cycles * t)
+    }
+
+    /// Seven or so cubics to a lobe, which is well past the point of being able to see the
+    /// difference between this and the sine it is standing in for.
+    private var segments: Int { 96 }
+
+    var curves: [Face.Curve] {
+        let width = end.x - start.x
+
+        // One slope per sample, shared by the segment on each side of it. That sharing is the
+        // smoothness: whatever this returns, the two cubics meeting here leave and arrive along the
+        // same line. Reading it off the curve either side rather than differentiating by hand keeps
+        // it honest when the envelope changes.
+        func slope(at u: CGFloat) -> CGFloat {
+            let step: CGFloat = 0.0005
+            let low = max(0, u - step), high = min(1, u + step)
+            return (height(at: high) - height(at: low)) / ((high - low) * width)
+        }
+
+        var curves: [Face.Curve] = []
+        var from = start
+        var fromSlope = slope(at: 0)
+        for step in 1...segments {
+            let u = CGFloat(step) / CGFloat(segments)
+            let to = point(start.x + width * u, height(at: u))
+            let toSlope = slope(at: u)
+            let handle = (to.x - from.x) / 3
+            curves.append(curve(
+                from.x + handle, from.y + fromSlope * handle,
+                to.x - handle, to.y - toSlope * handle,
+                to.x, to.y
+            ))
+            from = to
+            fromSlope = toSlope
+        }
+        return curves
+    }
+}
+
+/// Small, then the tallest at the third lobe, then down to nothing by x 566 — the wave is visibly
+/// over by the time it passes under the nose, and gone before the right nostril. Raising `cycles`
+/// or `span` on their own crowds or stretches the lobes; they move together.
+private let detailedMouth = Mouth(
+    start: point(186, 614),
+    end: point(842, 614),
+    amplitude: 66,
+    cycles: 4,
+    span: 0.58,
+    onset: 0.9,
+    decay: 2.3
+)
 
 private let detailed = Face(
     headStart: point(138, 596),
@@ -101,23 +207,29 @@ private let detailed = Face(
         (point(478, 470), curve(486, 480, 488, 492, 486, 500)),
         (point(550, 470), curve(542, 480, 540, 492, 542, 500)),
     ],
-    mouthStart: point(186, 612),
-    mouthCurves: [
-        curve(204, 546, 232, 544, 246, 606),
-        curve(258, 660, 288, 662, 300, 608),
-        curve(310, 566, 334, 564, 344, 604),
-        curve(350, 630, 370, 632, 384, 616),
-    ],
-    mouthEnd: point(842, 616),
+    mouthStart: detailedMouth.start,
+    mouthCurves: detailedMouth.curves,
     headLine: 19,
     eyeLine: 17,
     nostrilLine: 13,
     mouthLine: 16
 )
 
-/// Below 32 pixels the four-bend mouth closes up into a smear and the nostrils land on the same
-/// pixel as the eyes, so the small sizes get their own drawing: two bends, no nostrils, and lines
-/// heavy enough to survive rasterisation.
+/// Below 32 pixels the detailed mouth closes up into a smear and the nostrils land on the same
+/// pixel as the eyes, so the small sizes get their own drawing: half the cycles over a shorter span,
+/// no nostrils, and lines heavy enough to survive rasterisation. Two cycles is what fits — at 32
+/// pixels a lobe of the detailed wave is a pixel and a half wide, and a wave you cannot count the
+/// lobes of is just a thick line.
+private let simplifiedMouth = Mouth(
+    start: point(214, 616),
+    end: point(822, 616),
+    amplitude: 80,
+    cycles: 2,
+    span: 0.42,
+    onset: 1,
+    decay: 2.3
+)
+
 private let simplified = Face(
     headStart: point(150, 596),
     head: [
@@ -136,12 +248,8 @@ private let simplified = Face(
     pupilCentres: [point(352, 326), point(672, 326)],
     pupilRadius: 38,
     nostrils: [],
-    mouthStart: point(214, 616),
-    mouthCurves: [
-        curve(238, 540, 274, 540, 292, 612),
-        curve(306, 664, 340, 664, 356, 618),
-    ],
-    mouthEnd: point(822, 618),
+    mouthStart: simplifiedMouth.start,
+    mouthCurves: simplifiedMouth.curves,
     headLine: 34,
     eyeLine: 30,
     nostrilLine: 0,
@@ -246,14 +354,12 @@ private func drawIcon(in context: CGContext, size: CGFloat) {
         context.strokePath()
     }
 
-    // One stroke, wave to line. Drawing it as two paths would put a visible join where the wave
-    // settles, which is exactly the moment the mark is about.
+    // One stroke, wave to line — see `Mouth`, which is why there is nothing here to special-case.
     let mouth = CGMutablePath()
     mouth.move(to: at(face.mouthStart))
     for c in face.mouthCurves {
         mouth.addCurve(to: at(c.to), control1: at(c.c1), control2: at(c.c2))
     }
-    mouth.addLine(to: at(face.mouthEnd))
     context.addPath(mouth)
     context.setLineWidth(face.mouthLine * unit)
     context.strokePath()
@@ -293,6 +399,16 @@ extension Face {
 /// The shape is `simplified`'s, so the two marks read as the same animal. The line weights are
 /// not, and cannot be: 34/1024 is a confident stroke at 512 pixels and a third of a pixel at 18,
 /// which the rasteriser renders as grey haze. These land near 1.4 pixels at 18 and 2.8 at 36.
+private let menuBarMouth = Mouth(
+    start: point(206, 620),
+    end: point(830, 620),
+    amplitude: 84,
+    cycles: 2,
+    span: 0.44,
+    onset: 1,
+    decay: 2.3
+)
+
 private let menuBarFace = Face(
     headStart: simplified.headStart,
     head: simplified.head,
@@ -301,12 +417,8 @@ private let menuBarFace = Face(
     pupilCentres: simplified.pupilCentres,
     pupilRadius: 30,
     nostrils: [],
-    mouthStart: point(206, 620),
-    mouthCurves: [
-        curve(232, 528, 276, 528, 300, 616),
-        curve(318, 680, 356, 680, 376, 620),
-    ],
-    mouthEnd: point(830, 620),
+    mouthStart: menuBarMouth.start,
+    mouthCurves: menuBarMouth.curves,
     headLine: 62,
     eyeLine: 46,
     nostrilLine: 0,
@@ -314,9 +426,21 @@ private let menuBarFace = Face(
 )
 
 /// At 18 pixels the whole face is fourteen pixels tall. An eye becomes a four-pixel ring with a
-/// one-pixel hole, which rasterises to a grey blob, and two bends of mouth land inside three
-/// pixels. So the unscaled menu bar gets solid eyes and a single bend — the same trade the icon
-/// makes below 32 pixels, one size further down.
+/// one-pixel hole, which rasterises to a grey blob, and four lobes of mouth land inside four pixels.
+/// So the unscaled menu bar gets solid eyes and a single cycle — the same trade the icon makes
+/// below 32 pixels, one size further down. One cycle rather than none because the envelope still
+/// has to open and close for the wave to fade rather than stop, and at this size the second lobe is
+/// a quarter of the first and shows as little more than the angle the line leaves at.
+private let menuBarSmallMouth = Mouth(
+    start: point(214, 628),
+    end: point(822, 628),
+    amplitude: 88,
+    cycles: 1,
+    span: 0.32,
+    onset: 1,
+    decay: 2.3
+)
+
 private let menuBarSmallFace = Face(
     headStart: simplified.headStart,
     head: simplified.head,
@@ -325,11 +449,8 @@ private let menuBarSmallFace = Face(
     pupilCentres: [point(352, 340), point(672, 340)],
     pupilRadius: 46,
     nostrils: [],
-    mouthStart: point(214, 628),
-    mouthCurves: [
-        curve(252, 540, 312, 540, 350, 628),
-    ],
-    mouthEnd: point(822, 628),
+    mouthStart: menuBarSmallMouth.start,
+    mouthCurves: menuBarSmallMouth.curves,
     headLine: 44,
     eyeLine: 0,
     nostrilLine: 0,
@@ -387,7 +508,6 @@ private func drawMenuBarGlyph(in context: CGContext, size: CGFloat) {
     let mouth = CGMutablePath()
     mouth.move(to: face.mouthStart)
     for c in face.mouthCurves { mouth.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
-    mouth.addLine(to: face.mouthEnd)
     context.addPath(mouth)
     context.setLineWidth(face.mouthLine)
     context.strokePath()
