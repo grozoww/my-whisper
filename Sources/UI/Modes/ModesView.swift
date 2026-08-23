@@ -170,6 +170,29 @@ private struct ModeEditor: View {
             }
 
             SettingsSection(
+                title: "Clipboard",
+                subtitle: "For handing something you copied to the app you are dictating into."
+            ) {
+                toggle(
+                    "Paste the clipboard with the text",
+                    "Copy a stack trace or a message, say what you want done about it, and both arrive in one paste — exactly as it was copied. The model never sees it and never rewrites it, it never leaves the Mac, it is not kept in History, and a password copied from a password manager is skipped.",
+                    "doc.on.clipboard.fill",
+                    $draft.pastesClipboard
+                )
+                RowDivider()
+                SettingsRow(
+                    symbol: "text.insert",
+                    title: "Say this to place it",
+                    detail: "Speak these words and the clipboard is pasted there instead of at the end — \"here is the error, clipboard content, what does it mean?\". Pick something you would not say by accident. Empty means it always goes at the end."
+                ) {
+                    TextField("clipboard content", text: $draft.clipboardPlaceholder)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(minWidth: 110, idealWidth: 200, maxWidth: 200)
+                        .disabled(!draft.pastesClipboard)
+                }
+            }
+
+            SettingsSection(
                 title: "Switch to this mode in",
                 subtitle: "Bundle identifiers, one per line. When \"Switch modes by app\" is on, focusing one of these picks this mode."
             ) {

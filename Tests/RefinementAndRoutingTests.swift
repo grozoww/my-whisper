@@ -48,6 +48,8 @@ struct SchemaEvolutionTests {
         #expect(mode.cleanup.removeFillers)  // defaulted from the current CleanupOptions
         // Upgrading must not switch a privacy feature on behind the user's back.
         #expect(mode.usesClipboardContext == false)
+        #expect(mode.pastesClipboard == false)
+        #expect(mode.clipboardPlaceholder == "clipboard content")
     }
 
     @Test("A history entry missing later fields still loads")
@@ -283,14 +285,114 @@ struct ClipboardContextTests {
         #expect(ClipboardContext.read(from: pasteboard("blank")) == nil)
     }
 
-    @Test("A long clipboard is capped")
-    func capsLongClipboards() throws {
+    @Test("A long clipboard is read whole")
+    func readsLongClipboardsWhole() throws {
+        // Uncapped at the read, because the same text is what gets pasted. The cap belongs to the
+        // model's copy of it, tested below.
         let board = pasteboard("long")
-        board.setString(String(repeating: "a", count: ClipboardContext.characterLimit * 2), forType: .string)
+        let long = String(repeating: "a", count: ClipboardContext.referenceLimit * 2)
+        board.setString(long, forType: .string)
 
-        let read = try #require(ClipboardContext.read(from: board))
-        #expect(read.count == ClipboardContext.characterLimit + 1)  // the ellipsis
-        #expect(read.hasSuffix("…"))
+        #expect(ClipboardContext.read(from: board) == long)
+    }
+
+    @Test("The model's copy is capped")
+    func capsTheModelsCopy() {
+        let long = String(repeating: "a", count: ClipboardContext.referenceLimit * 2)
+        let reference = ClipboardContext.reference(long)
+
+        #expect(reference.count == ClipboardContext.referenceLimit + 1)  // the ellipsis
+        #expect(reference.hasSuffix("…"))
+        #expect(ClipboardContext.reference("short") == "short")
+    }
+}
+
+@Suite("Clipboard in the paste")
+struct ClipboardPasteTests {
+    @Test("The clipboard follows the dictated text after a blank line")
+    func appendsAfterABlankLine() {
+        let combined = ClipboardContext.appended("Traceback (most recent call last):", to: "What does this mean?")
+        #expect(combined == "What does this mean?\n\nTraceback (most recent call last):")
+    }
+
+    @Test("Nothing on the clipboard changes nothing")
+    func leavesTheTextAloneWithoutAClipboard() {
+        #expect(ClipboardContext.appended(nil, to: "Just what I said") == "Just what I said")
+        #expect(ClipboardContext.appended("", to: "Just what I said") == "Just what I said")
+    }
+
+    @Test("What is pasted is never shortened")
+    func pastesTheWholeClipboard() {
+        // The whole point of the separate shape: the model's copy is capped, the paste is not.
+        let long = String(repeating: "a", count: ClipboardContext.referenceLimit * 3)
+        let combined = ClipboardContext.appended(long, to: "here")
+
+        #expect(combined.hasSuffix(long))
+        #expect(!combined.contains("…"))
+    }
+}
+
+@Suite("Clipboard placeholder")
+struct ClipboardPlaceholderTests {
+    private let placeholder = "clipboard content"
+
+    @Test("The spoken placeholder is where the clipboard lands")
+    func replacesThePlaceholder() {
+        let text = "Here is the error, clipboard content, what does it mean?"
+        let result = ClipboardContext.substituted("TypeError: x", into: text, placeholder: placeholder)
+
+        #expect(result == "Here is the error, TypeError: x, what does it mean?")
+    }
+
+    @Test("Sentence case does not stop it matching")
+    func matchesRegardlessOfCase() {
+        let result = ClipboardContext.substituted("x", into: "Clipboard Content is above.", placeholder: placeholder)
+        #expect(result == "x is above.")
+    }
+
+    @Test("Said twice, pasted twice")
+    func replacesEveryOccurrence() {
+        let result = ClipboardContext.substituted("X", into: "clipboard content and clipboard content", placeholder: placeholder)
+        #expect(result == "X and X")
+    }
+
+    @Test("A placeholder that was not said sends the clipboard to the end")
+    func fallsBackToAppending() {
+        // Also the model's escape hatch: it sees the placeholder as ordinary words and may reword
+        // it, and the clipboard still has to arrive.
+        let result = ClipboardContext.substituted("X", into: "Nothing spoken here.", placeholder: placeholder)
+        #expect(result == "Nothing spoken here.\n\nX")
+    }
+
+    @Test("An empty placeholder means the end, every time")
+    func emptyPlaceholderAppends() {
+        #expect(ClipboardContext.substituted("X", into: "Said it.", placeholder: "  ") == "Said it.\n\nX")
+    }
+
+    @Test("Nothing on the clipboard leaves what was said alone")
+    func leavesTheTextAloneWithoutAClipboard() {
+        let text = "Here is the error, clipboard content."
+        #expect(ClipboardContext.substituted(nil, into: text, placeholder: placeholder) == text)
+    }
+
+    @Test("A Cyrillic placeholder matches whole words only")
+    func matchesCyrillicWholeWords() {
+        // `\b` is ASCII-only and fires inside Cyrillic text — the trap `RuleRefiner` documents.
+        // "буфер" must not match inside "буферизация".
+        let phrase = "буфер обмена"
+        let result = ClipboardContext.substituted("X", into: "Вот ошибка, буфер обмена, что это?", placeholder: phrase)
+        #expect(result == "Вот ошибка, X, что это?")
+
+        let untouched = ClipboardContext.substituted("X", into: "буферизация обмена данных", placeholder: "буфер")
+        #expect(untouched == "буферизация обмена данных\n\nX")
+    }
+
+    @Test("A clipboard full of substitution syntax is pasted as text")
+    func escapesTemplateSyntax() {
+        // `$1` and a backslash are a replacement template to `NSRegularExpression`, and whatever
+        // the user copied is not a template.
+        let result = ClipboardContext.substituted("cost: $1 \\ $0", into: "clipboard content", placeholder: placeholder)
+        #expect(result == "cost: $1 \\ $0")
     }
 }
 

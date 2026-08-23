@@ -202,12 +202,26 @@ struct ModeStoreTests {
     func reportsWhetherAnyModeWantsTheClipboard() {
         let temp = TemporaryDirectory()
         let store = ModeStore(directory: temp.url)
-        #expect(store.anyModeUsesClipboardContext == false)  // nothing ships with it on
+        #expect(store.anyModeReadsClipboard == false)  // nothing ships with either toggle on
 
         var code = store.modes.first { $0.name == "Code" }!
         code.usesClipboardContext = true
         store.update(code)
-        #expect(store.anyModeUsesClipboardContext)
+        #expect(store.anyModeReadsClipboard)
+    }
+
+    @Test("Pasting the clipboard is reason enough to read it")
+    func readsTheClipboardForPastingToo() {
+        // Two independent toggles, one read. Either being on anywhere has to be enough, or the
+        // paste toggle would silently do nothing for anyone who left the context one off.
+        let temp = TemporaryDirectory()
+        let store = ModeStore(directory: temp.url)
+
+        var general = store.modes.first { $0.name == "General" }!
+        general.pastesClipboard = true
+        store.update(general)
+
+        #expect(store.anyModeReadsClipboard)
     }
 
     @Test("Built-in modes cannot be deleted")

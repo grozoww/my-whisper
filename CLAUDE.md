@@ -121,10 +121,29 @@ fast and do not add work to them.
 **The clipboard has to be read before the paste, not after.** `TextInjector` pastes through the
 clipboard, so by the time cleanup runs the user's clipboard is already the dictated text.
 `DictationController.beginRecording` reads it alongside the paste target, for the same reason, and
-it only reads it at all when some mode has "Use the clipboard as context" on — that condition is
-what lets the README say the clipboard is otherwise only touched to paste. `ClipboardContext` is
-the single place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`,
-which is what a password manager sets on a copied password.
+it only reads it at all when some mode has "Use the clipboard as context" or "Paste the clipboard
+after the text" on — `ModeStore.anyModeReadsClipboard` is that condition, and it is what lets the
+README say the clipboard is otherwise only touched to paste. `ClipboardContext` is the single
+place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`, which is
+what a password manager sets on a copied password.
+
+**The two clipboard toggles are opposite treatments of the same text.** Context shows it to the
+on-device model, capped at `ClipboardContext.referenceLimit`, with a prompt forbidding the model
+from repeating any of it. Paste never shows the model anything and reproduces the clipboard
+verbatim after the dictated text — uncapped, because a copied stack trace the app quietly
+shortened would be worse than not pasting it. Keep the capping on `ClipboardContext.reference`,
+not on the read: the read result is what gets pasted. History records what was dictated, not the
+combined paste, so a thirty-day history file never accumulates copies of the user's clipboard.
+
+**The clipboard placeholder is substituted last, and that ordering is the whole design.**
+`ClipboardContext.substituted` runs after rules *and* after the model, because the one thing the
+model must never see is the text it is about to reproduce — it rewords a stack trace, and
+`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×. The price is
+that the model sees the placeholder as ordinary words and can reword it, so a miss falls back to
+appending at the end rather than losing the clipboard. Match with
+`RuleRefiner.cachedWordRegex(for:)` — a hand-rolled `\b` here would fire inside Cyrillic — and
+escape the clipboard with `NSRegularExpression.escapedTemplate(for:)`, or a copied `$1` becomes a
+capture reference.
 
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.

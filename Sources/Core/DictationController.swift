@@ -173,8 +173,8 @@ final class DictationController {
 
         // Read now, for the same reason: this is the clipboard the user had when they started
         // talking, and by the time the text is pasted the injector will have overwritten it. The
-        // check means a user with the toggle off nowhere never has their clipboard read at all.
-        clipboardContext = modes.anyModeUsesClipboardContext ? ClipboardContext.current() : nil
+        // check means a user with both toggles off everywhere never has their clipboard read.
+        clipboardContext = modes.anyModeReadsClipboard ? ClipboardContext.current() : nil
 
         do {
             try capture.start(deviceUID: settings.settings.sound.inputDeviceUID)
@@ -259,9 +259,19 @@ final class DictationController {
                 clipboard: clipboard
             )
 
-            let method = try await injector.inject(refined.text)
+            // The clipboard goes in after cleanup, never through it: this is text the user copied
+            // to paste, and a model that reworded a stack trace would have ruined the point. It
+            // lands where the placeholder was spoken, or at the end when it was not.
+            let pasted = mode.pastesClipboard
+                ? ClipboardContext.substituted(clipboard, into: refined.text, placeholder: mode.clipboardPlaceholder)
+                : refined.text
+
+            let method = try await injector.inject(pasted)
             log.debug("Injected via \(method.rawValue, privacy: .public)")
 
+            // What is recorded is what was dictated, not what was pasted. History is kept for
+            // thirty days by default, and writing a copy of every clipboard used into it would
+            // outlive the paste by a month for no benefit the user asked for.
             record(
                 raw: result.text,
                 final: refined.text,

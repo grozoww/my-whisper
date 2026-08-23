@@ -24,8 +24,10 @@ final class RefinementPipeline {
     }
 
     /// `clipboard` is what the user had copied when they started speaking, or nil when nothing
-    /// read it. Whether it is used at all is the mode's decision, made here so there is one place
-    /// to look for the answer to "why did the model see my clipboard".
+    /// read it. Whether the model is shown it at all is the mode's decision, made here so there is
+    /// one place to look for the answer to "why did the model see my clipboard". Pasting it is a
+    /// different toggle and happens after this, in `DictationController` — the model is never
+    /// shown the text it is about to paste verbatim.
     func refine(
         _ raw: String,
         mode: Mode,
@@ -46,7 +48,7 @@ final class RefinementPipeline {
         let refined = await onDevice.refine(
             cleaned,
             instructions: mode.instructions,
-            context: mode.usesClipboardContext ? clipboard : nil,
+            context: mode.usesClipboardContext ? clipboard.map(ClipboardContext.reference) : nil,
             timeout: .seconds(max(1, settings.modelTimeoutSeconds))
         )
 
