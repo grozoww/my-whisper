@@ -17,6 +17,13 @@ enum ClipboardContext {
     /// is shown, never what is pasted.
     static let referenceLimit = 2000
 
+    /// The token the on-device model is asked to leave standing where the clipboard goes.
+    ///
+    /// Deliberately not prose: the model has to reproduce it character for character, and anything
+    /// that reads like words gets tidied into different words. Brackets and capitals are the shape
+    /// a small model copies most reliably, and no dictated sentence contains them by accident.
+    static let marker = "[[CLIPBOARD]]"
+
     /// Types that mean "this was not meant to be kept". `ConcealedType` is what 1Password and the
     /// other managers set on a copied password; the rest are the same convention for clipboard
     /// managers, and anything wearing one of them is exactly what must not end up in a prompt.
@@ -70,17 +77,32 @@ enum ClipboardContext {
     /// error I keep getting, clipboard content, what does it mean?"*. Every occurrence is
     /// replaced, because saying it twice means twice.
     ///
-    /// This is a rule, not a prompt. It runs after the whole refinement pipeline, which is the
-    /// only order that works: showing the model the text it is about to reproduce gets a stack
-    /// trace reworded, and the length check in `OnDeviceRefiner` would throw the answer away for
-    /// growing. The cost of running last is that the model sees the placeholder as ordinary words
-    /// and may reword it — when it has, nothing matches and the clipboard goes to the end, which
-    /// is where it would have gone with no placeholder at all.
+    /// Two ways of finding the spot, in order. The model is asked to leave `marker` where the user
+    /// asked for the clipboard, so when the marker is there the position is exact and there is
+    /// nothing to match — the model did the judging, which is the part it is good at, and handed
+    /// back a literal, which is the part a rule is good at. That covers the case a rule cannot:
+    /// the placeholder reworded, reordered or absorbed into the sentence around it.
+    ///
+    /// Without the marker — the model is off, the mode has no instructions, or it ignored the
+    /// request — the spoken phrase is matched directly, loosely enough to survive the ending it
+    /// picked up on the way through the speech recogniser. Failing that the clipboard goes to the
+    /// end, which is where it would have gone with no placeholder at all.
+    ///
+    /// What does *not* change is the ordering: this runs after the whole refinement pipeline, so
+    /// the model is never shown the text it is about to reproduce. Showing it gets a stack trace
+    /// reworded, and the length check in `OnDeviceRefiner` would then throw the answer away for
+    /// growing.
     static func substituted(_ clipboard: String?, into text: String, placeholder: String) -> String {
-        guard let clipboard, !clipboard.isEmpty else { return text }
+        // No clipboard, so a marker has nothing to stand for and must not reach the document.
+        guard let clipboard, !clipboard.isEmpty else { return removingMarker(from: text) }
+
+        if text.range(of: marker, options: .caseInsensitive) != nil {
+            // A plain string replacement, so nothing in the clipboard is read as regex syntax.
+            return text.replacingOccurrences(of: marker, with: clipboard, options: .caseInsensitive)
+        }
 
         let phrase = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !phrase.isEmpty, let regex = RuleRefiner.cachedWordRegex(for: phrase) else {
+        guard !phrase.isEmpty, let regex = RuleRefiner.cachedInflectedRegex(for: phrase) else {
             return appended(clipboard, to: text)
         }
 
@@ -94,6 +116,47 @@ enum ClipboardContext {
             in: text,
             range: range,
             withTemplate: NSRegularExpression.escapedTemplate(for: clipboard)
+        )
+    }
+
+    /// True when what the user said plausibly names the clipboard at all.
+    ///
+    /// This is what decides whether the model is asked for the marker in the first place. The
+    /// model gets to say *where* the clipboard goes, never *whether* it was asked for: a marker
+    /// invented over a sentence that never mentioned the clipboard would drop it mid-thought,
+    /// which is worse than the end.
+    ///
+    /// Only the first word, and matched as a substring rather than a whole word, because a loose
+    /// net is exactly what is wanted here — "буфера" and "clipboard's" both have to count. The
+    /// precise judgement is the model's job; this only rules out the sentences where there is
+    /// nothing to judge.
+    static func mentioned(_ placeholder: String, in text: String) -> Bool {
+        guard let head = placeholder.split(whereSeparator: \.isWhitespace).first else { return false }
+        return text.range(of: String(head), options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
+    /// Takes out a marker that has nothing to stand for, and closes the gap it leaves.
+    ///
+    /// Reached when the clipboard turned out to be empty or concealed after the model had already
+    /// been asked to place it. The three passes are the punctuation the marker was sitting
+    /// between: "the error, [[CLIPBOARD]], what?" has to come back as "the error, what?" rather
+    /// than "the error, , what?".
+    static func removingMarker(from text: String) -> String {
+        guard text.range(of: marker, options: .caseInsensitive) != nil else { return text }
+
+        var result = text.replacingOccurrences(of: marker, with: "", options: .caseInsensitive)
+        result = replacing(#"([,;:])[ \t]*([,.!?;:])"#, in: result, with: "$2")
+        result = replacing(#"[ \t]{2,}"#, in: result, with: " ")
+        result = replacing(#"[ \t]+([,.!?;:])"#, in: result, with: "$1")
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func replacing(_ pattern: String, in text: String, with template: String) -> String {
+        guard let regex = RuleRefiner.cachedRegex(pattern) else { return text }
+        return regex.stringByReplacingMatches(
+            in: text,
+            range: NSRange(text.startIndex..., in: text),
+            withTemplate: template
         )
     }
 }

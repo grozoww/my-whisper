@@ -394,19 +394,71 @@ struct ClipboardPlaceholderTests {
         let result = ClipboardContext.substituted("cost: $1 \\ $0", into: "clipboard content", placeholder: placeholder)
         #expect(result == "cost: $1 \\ $0")
     }
+
+    @Test("The ending a spoken placeholder picks up does not lose it")
+    func matchesAnInflectedPlaceholder() {
+        // What the user says and what the recogniser writes down are not the same words. This is
+        // the whole reason the model is asked to mark the spot as well.
+        let result = ClipboardContext.substituted("X", into: "Here are the clipboard contents, thanks.", placeholder: placeholder)
+        #expect(result == "Here are the X, thanks.")
+
+        let russian = ClipboardContext.substituted("X", into: "Вот буфера обмена, смотри.", placeholder: "буфер обмена")
+        #expect(russian == "Вот X, смотри.")
+    }
+
+    @Test("The marker the model left is where the clipboard goes")
+    func replacesTheMarker() {
+        // The case no rule can reach: the model reworded the placeholder out of existence and put
+        // the marker where it used to be.
+        let text = "Here is the error I keep hitting — \(ClipboardContext.marker) — any idea?"
+        let result = ClipboardContext.substituted("TypeError: x", into: text, placeholder: placeholder)
+
+        #expect(result == "Here is the error I keep hitting — TypeError: x — any idea?")
+    }
+
+    @Test("The marker beats the spoken phrase when both are there")
+    func prefersTheMarker() {
+        let text = "\(ClipboardContext.marker) is what clipboard content means."
+        let result = ClipboardContext.substituted("X", into: text, placeholder: placeholder)
+
+        #expect(result == "X is what clipboard content means.")
+    }
+
+    @Test("A marker that a clipboard never arrived for is taken out, not pasted")
+    func removesAnUnfilledMarker() {
+        // Concealed or empty clipboards are read as nothing, and by then the model has already
+        // placed the marker. Pasting it literally would be the worst of both.
+        let text = "Here is the error, \(ClipboardContext.marker), what does it mean?"
+        #expect(ClipboardContext.substituted(nil, into: text, placeholder: placeholder) == "Here is the error, what does it mean?")
+
+        // The mark the marker was introduced with goes with it — a colon left dangling in front of
+        // a full stop is a sentence that reads as though something went missing, which it did.
+        let trailing = "Look at this: \(ClipboardContext.marker)."
+        #expect(ClipboardContext.substituted("", into: trailing, placeholder: placeholder) == "Look at this.")
+    }
+
+    @Test("Only a transcript that names the clipboard gets the model asked about it")
+    func mentionsGatesTheRequest() {
+        // The model decides where, never whether. A sentence with nothing clipboard-shaped in it
+        // never has the request put in front of it.
+        #expect(ClipboardContext.mentioned(placeholder, in: "the clipboard's contents, please"))
+        #expect(ClipboardContext.mentioned("буфер обмена", in: "вставь буфера обмена сюда"))
+        #expect(!ClipboardContext.mentioned(placeholder, in: "ship it on tuesday"))
+        #expect(!ClipboardContext.mentioned("  ", in: "clipboard content"))
+    }
 }
 
 @Suite("Clipboard in the prompt")
 struct ClipboardPromptTests {
     @Test("No clipboard means no clipboard block")
     func omitsTheBlockWhenThereIsNothing() {
-        let prompt = OnDeviceRefiner.prompt(for: "ship it on tuesday", context: nil)
+        let prompt = OnDeviceRefiner.prompt(for: "ship it on tuesday", context: nil, clipboardPlaceholder: nil)
         #expect(!prompt.contains("CLIPBOARD"))
     }
 
     @Test("The clipboard is delimited and marked as reference, never as instructions")
     func fencesTheClipboard() {
-        let prompt = OnDeviceRefiner.prompt(for: "send it to kruhlov", context: "Denys Kruhlov")
+        let prompt = OnDeviceRefiner.prompt(for: "send it to kruhlov", context: "Denys Kruhlov", clipboardPlaceholder: nil)
 
         #expect(prompt.contains("<<<CLIPBOARD"))
         #expect(prompt.contains("CLIPBOARD>>>"))
@@ -420,6 +472,25 @@ struct ClipboardPromptTests {
         let original = "send it to kruhlov this afternoon"
         let cleaned = OnDeviceRefiner.sanityChecked("<<<CLIPBOARD Send it to Kruhlov this afternoon. CLIPBOARD>>>", against: original)
         #expect(cleaned == "Send it to Kruhlov this afternoon.")
+    }
+
+    @Test("No placeholder means the model is never asked to place anything")
+    func omitsThePlacementRequestWhenNotAsked() {
+        let prompt = OnDeviceRefiner.prompt(for: "ship it on tuesday", context: nil, clipboardPlaceholder: nil)
+        #expect(!prompt.contains(ClipboardContext.marker))
+    }
+
+    @Test("The placement request names the marker exactly and forbids inventing one")
+    func asksForTheMarker() {
+        let prompt = OnDeviceRefiner.prompt(
+            for: "here is the error, clipboard content, what is it",
+            context: nil,
+            clipboardPlaceholder: "clipboard content"
+        )
+
+        #expect(prompt.contains(ClipboardContext.marker))
+        #expect(prompt.contains("\"clipboard content\""))
+        #expect(prompt.contains("If they never ask for it"))
     }
 
     @Test("A model that pastes the clipboard instead of the transcript is rejected")

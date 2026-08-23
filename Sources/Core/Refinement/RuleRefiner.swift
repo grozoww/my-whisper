@@ -223,6 +223,14 @@ struct RuleRefiner: Sendable {
         regexCache.wordRegex(for: phrase)
     }
 
+    static func cachedInflectedRegex(for phrase: String) -> NSRegularExpression? {
+        regexCache.inflectedRegex(for: phrase)
+    }
+
+    static func cachedRegex(_ pattern: String) -> NSRegularExpression? {
+        regexCache.regex(pattern)
+    }
+
     private static func replace(
         _ pattern: String,
         in text: String,
@@ -263,5 +271,22 @@ private final class RegexCache: @unchecked Sendable {
     func wordRegex(for phrase: String) -> NSRegularExpression? {
         let escaped = NSRegularExpression.escapedPattern(for: phrase)
         return regex(#"(?<![\p{L}\p{N}])"# + escaped + #"(?![\p{L}\p{N}])"#, options: [.caseInsensitive])
+    }
+
+    /// The same whole-word match, allowing each word the ending a *spoken* phrase arrives with.
+    ///
+    /// A phrase the user says rather than types comes back declined: "clipboard content" is heard
+    /// as "clipboard contents", and "буфер обмена" as "буфера обмена". Three letters is the longest
+    /// ending worth guessing — it covers the Slavic cases and the English plural, and it is short
+    /// enough that "буфер" still cannot reach into "буферизация", which is the whole reason the
+    /// boundaries above are written in Unicode terms.
+    func inflectedRegex(for phrase: String) -> NSRegularExpression? {
+        let words = phrase.split(whereSeparator: \.isWhitespace)
+        guard !words.isEmpty else { return nil }
+
+        let body = words
+            .map { NSRegularExpression.escapedPattern(for: String($0)) + #"\p{L}{0,3}"# }
+            .joined(separator: #"\s+"#)
+        return regex(#"(?<![\p{L}\p{N}])"# + body + #"(?![\p{L}\p{N}])"#, options: [.caseInsensitive])
     }
 }
