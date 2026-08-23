@@ -28,14 +28,15 @@ final class UpdateChecker {
         let publishedAt: Date?
     }
 
-    /// The list of releases, newest first — deliberately *not* `/releases/latest`.
+    /// The list of releases — deliberately *not* `/releases/latest`, and deliberately not read in
+    /// the order it arrives in; see `newestFinishedRelease`.
     ///
     /// That endpoint only ever answers with the one release GitHub itself considers latest, and it
     /// skips prereleases entirely. Every release used to be marked a prerelease, so it answered
     /// 404 and this type read that as "up to date" — the check found nothing, for ever. A build
     /// from main is a finished release now, but a rehearsal run is still a prerelease, so reading
-    /// the list and taking the newest finished entry stays the answer that cannot go quiet on us.
-    /// `scripts/install.sh` reads this same list for the same reason.
+    /// the whole list and picking the highest finished version out of it stays the answer that
+    /// cannot go quiet on us. `scripts/install.sh` reads this same list for the same reason.
     ///
     /// No query string, so the request stays something anyone can verify says nothing about them —
     /// see `sendsNothingIdentifying`. GitHub's default page of 30 is far more than enough.
@@ -124,11 +125,20 @@ final class UpdateChecker {
         (try? JSONSerialization.jsonObject(with: data)).flatMap(newestFinishedRelease(in:))
     }
 
-    /// The first release in the list that is finished — GitHub returns them newest first, so the
-    /// first one that qualifies is the newest one on offer.
+    /// The finished release carrying the highest version — deliberately *not* the first one listed.
+    ///
+    /// GitHub documents no order for `GET /releases`, and it does not come back newest first. The
+    /// real response for this repository puts `release-1.0.9-38ea901` ahead of 1.0.12, 1.0.11 and
+    /// 1.0.10, in an order matching neither `id`, `created_at` nor `published_at`. Taking the first
+    /// finished entry therefore told a user on 1.0.11 that the newest release was 1.0.9 — which is
+    /// not newer, so the check answered "up to date" and went on doing so for every release after
+    /// it. `scripts/install.sh` had the identical bug and fixes it with `sort -V`; this is the
+    /// same fix on the app side, and it is why the version has to be parsed before anything is
+    /// compared rather than after a position is chosen.
     nonisolated static func newestFinishedRelease(in json: Any) -> Release? {
         if let list = json as? [[String: Any]] {
-            return list.lazy.compactMap(release(from:)).first
+            return list.compactMap(release(from:))
+                .max { isVersion($1.version, newerThan: $0.version) }
         }
         return (json as? [String: Any]).flatMap(release(from:))
     }

@@ -380,6 +380,21 @@ and GitHub documents no order at all. `install.sh` took the first DMG in that re
 takes the highest with `sort -V`. **Never read a GitHub releases list positionally.** And the same
 mistake in miniature: plain `sort` puts 1.0.9 above 1.0.10, so the `-V` is not decoration.
 
+That rule has two callers, and fixing one of them is what let this run for four more releases.
+`UpdateChecker.newestFinishedRelease` took the first *finished* entry in the same list, on the same
+false belief, written down in its own doc comment as "GitHub returns them newest first". The list
+put `release-1.0.9-38ea901` ahead of 1.0.12, 1.0.11 and 1.0.10, so an app on 1.0.11 was told 1.0.9
+was the newest, found it was not newer, and reported itself up to date — silently, and looking
+perfectly healthy while doing it. It now takes the highest parsed version out of the whole list.
+**Parse every entry's version and take the maximum; never trust a position.** Both callers, every
+time.
+
+The test is the other half of why it survived. `picksNewestFinishedRelease` was called "the newest
+finished release in the list is the one offered" and its fixture was sorted newest first, so it
+passed identically whether the code sorted or took element zero. **A fixture for an
+order-independence claim must be out of order**, or it asserts nothing. `ignoresTheOrderGitHubReturns`
+now uses the real response verbatim.
+
 The checksum had the matching bug. `SHA256SUMS` was found by its own separate search over the same
 response, so it could come from a different release than the DMG — and then the filename lookup
 found nothing, `EXPECTED` came out empty, and the check was skipped in silence. It is now derived
