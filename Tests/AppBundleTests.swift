@@ -23,6 +23,19 @@ struct AppBundleTests {
         #expect(NSImage(named: "AppIcon") != nil)
     }
 
+    /// The menu bar glyph fails quieter still than the app icon: an unresolved name draws nothing
+    /// at all, and the app's only visible surface becomes an empty gap beside the clock. The
+    /// template flag is the other half — without it macOS ships the artwork as literal black
+    /// pixels, which are invisible on a dark menu bar.
+    @Test("The menu bar carries the app's own mark, as a template")
+    func hasMenuBarIcon() throws {
+        let icon = try #require(NSImage(named: AppState.MenuBarGlyph.frog))
+        #expect(icon.isTemplate)
+        // 18 points is what a status item is given. `MenuBarExtra` does not resize the label, so
+        // artwork of any other size arrives at that size.
+        #expect(icon.size == CGSize(width: 18, height: 18))
+    }
+
     @Test("Every login-item state explains itself", arguments: [
         SMAppService.Status.enabled,
         .requiresApproval,

@@ -6,6 +6,9 @@
 //                                        and docs/images/icon.png, which the README opens with
 //   ./scripts/make-icon.swift --icns     also write dist/OurWhisper.icns
 //
+// Two marks come out of this, the app icon and the menu bar glyph, and they are here together
+// because they are the same frog and have to stay the same frog.
+//
 // The icon is code rather than a checked-in design file for one reason: there is no designer on
 // this project and no licence for one. Code can be re-rendered at a new size, recoloured, and
 // reviewed in a diff, none of which a flattened PNG can. The PNGs it produces *are* committed, so
@@ -258,6 +261,138 @@ private func drawIcon(in context: CGContext, size: CGFloat) {
     context.restoreGState()
 }
 
+// MARK: - Menu bar glyph
+
+/// Everything the glyph puts on the canvas, in 1024 space, including the outer half of every
+/// stroke. The menu bar drawing is fitted to its canvas rather than laid out in it, and a fit
+/// that measured the centre line would clip the outside of the head by half a line.
+extension Face {
+    var bounds: CGRect {
+        let path = CGMutablePath()
+        path.move(to: headStart)
+        for c in head { path.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
+        var box = path.boundingBoxOfPath.insetBy(dx: -headLine / 2, dy: -headLine / 2)
+        for centre in eyeCentres {
+            let r = eyeRadius + eyeLine / 2
+            box = box.union(CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
+        }
+        return box
+    }
+}
+
+/// The menu bar mark: the same face, drawn as an outline with nothing filled in.
+///
+/// It is a *template* image, which is the whole reason there is one drawing and not two. macOS
+/// keeps only the alpha channel of a template and paints the shape itself — dark on a light menu
+/// bar, light on a dark one, inverted again while the menu is open, and correct under Increase
+/// Contrast. A checked-in light PNG and dark PNG would get all four of those wrong, and the first
+/// one worst: the menu bar's appearance follows the desktop picture, not the appearance setting
+/// in System Settings, so a dark wallpaper under Light Mode would take the light artwork and
+/// disappear into the bar.
+///
+/// The shape is `simplified`'s, so the two marks read as the same animal. The line weights are
+/// not, and cannot be: 34/1024 is a confident stroke at 512 pixels and a third of a pixel at 18,
+/// which the rasteriser renders as grey haze. These land near 1.4 pixels at 18 and 2.8 at 36.
+private let menuBarFace = Face(
+    headStart: simplified.headStart,
+    head: simplified.head,
+    eyeCentres: simplified.eyeCentres,
+    eyeRadius: 96,
+    pupilCentres: simplified.pupilCentres,
+    pupilRadius: 30,
+    nostrils: [],
+    mouthStart: point(206, 620),
+    mouthCurves: [
+        curve(232, 528, 276, 528, 300, 616),
+        curve(318, 680, 356, 680, 376, 620),
+    ],
+    mouthEnd: point(830, 620),
+    headLine: 62,
+    eyeLine: 46,
+    nostrilLine: 0,
+    mouthLine: 52
+)
+
+/// At 18 pixels the whole face is fourteen pixels tall. An eye becomes a four-pixel ring with a
+/// one-pixel hole, which rasterises to a grey blob, and two bends of mouth land inside three
+/// pixels. So the unscaled menu bar gets solid eyes and a single bend — the same trade the icon
+/// makes below 32 pixels, one size further down.
+private let menuBarSmallFace = Face(
+    headStart: simplified.headStart,
+    head: simplified.head,
+    eyeCentres: simplified.eyeCentres,
+    eyeRadius: 46,
+    pupilCentres: [point(352, 340), point(672, 340)],
+    pupilRadius: 46,
+    nostrils: [],
+    mouthStart: point(214, 628),
+    mouthCurves: [
+        curve(252, 540, 312, 540, 350, 628),
+    ],
+    mouthEnd: point(822, 628),
+    headLine: 44,
+    eyeLine: 0,
+    nostrilLine: 0,
+    mouthLine: 38
+)
+
+/// Black on nothing. A template's colour is never used, but the alpha is, so anti-aliased edges
+/// have to come from the shape rather than from a grey fill.
+private func drawMenuBarGlyph(in context: CGContext, size: CGFloat) {
+    let face = size <= 18 ? menuBarSmallFace : menuBarFace
+    let box = face.bounds
+
+    context.setShouldAntialias(true)
+    context.interpolationQuality = .high
+    context.setLineCap(.round)
+    context.setLineJoin(.round)
+
+    // Fitted, not inset. The frog is half again as wide as it is tall, so drawing it to the
+    // icon's proportions would leave a third of an 18-point square empty and the mark would read
+    // smaller than every SF Symbol beside it.
+    let scale = min(size / box.width, size / box.height)
+    context.translateBy(x: 0, y: size)
+    context.scaleBy(x: 1, y: -1)
+    context.translateBy(
+        x: (size - box.width * scale) / 2,
+        y: (size - box.height * scale) / 2
+    )
+    context.scaleBy(x: scale, y: scale)
+    context.translateBy(x: -box.minX, y: -box.minY)
+
+    context.setStrokeColor(rgb(Palette.ink))
+    context.setFillColor(rgb(Palette.ink))
+
+    let head = CGMutablePath()
+    head.move(to: face.headStart)
+    for c in face.head { head.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
+    head.closeSubpath()
+    context.addPath(head)
+    context.setLineWidth(face.headLine)
+    context.strokePath()
+
+    // A ring where there is room for a hole, a dot where there is not.
+    for (centre, pupil) in zip(face.eyeCentres, face.pupilCentres) {
+        if face.eyeLine > 0 {
+            let r = face.eyeRadius
+            context.addEllipse(in: CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
+            context.setLineWidth(face.eyeLine)
+            context.strokePath()
+        }
+        let r = face.pupilRadius
+        context.addEllipse(in: CGRect(x: pupil.x - r, y: pupil.y - r, width: r * 2, height: r * 2))
+        context.fillPath()
+    }
+
+    let mouth = CGMutablePath()
+    mouth.move(to: face.mouthStart)
+    for c in face.mouthCurves { mouth.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
+    mouth.addLine(to: face.mouthEnd)
+    context.addPath(mouth)
+    context.setLineWidth(face.mouthLine)
+    context.strokePath()
+}
+
 private func render(pixels: Int) -> CGImage {
     guard let context = CGContext(
         data: nil,
@@ -272,6 +407,23 @@ private func render(pixels: Int) -> CGImage {
     }
     drawIcon(in: context, size: CGFloat(pixels))
     guard let image = context.makeImage() else { fatalError("could not render \(pixels)x\(pixels)") }
+    return image
+}
+
+private func renderMenuBar(pixels: Int) -> CGImage {
+    guard let context = CGContext(
+        data: nil,
+        width: pixels,
+        height: pixels,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else {
+        fatalError("could not create a \(pixels)x\(pixels) bitmap context")
+    }
+    drawMenuBarGlyph(in: context, size: CGFloat(pixels))
+    guard let image = context.makeImage() else { fatalError("could not render the menu bar glyph at \(pixels)") }
     return image
 }
 
@@ -344,6 +496,48 @@ try! catalogContents.write(
 )
 
 print("✓ Sources/Resources/Assets.xcassets/AppIcon.appiconset")
+
+// MARK: - Menu bar image set
+
+// 18 points is what a status item is given, and macOS has no 3x display, so this is the whole set.
+// `template-rendering-intent` is the load-bearing line: without it the artwork ships as literal
+// black pixels and vanishes on a dark menu bar.
+private let menuBarSet = root
+    .appendingPathComponent("Sources/Resources/Assets.xcassets/MenuBarIcon.imageset")
+try! FileManager.default.createDirectory(at: menuBarSet, withIntermediateDirectories: true)
+
+var menuBarEntries: [String] = []
+for scale in [1, 2] {
+    let pixels = 18 * scale
+    let name = "menubar_18x18\(scale == 2 ? "@2x" : "").png"
+    writePNG(renderMenuBar(pixels: pixels), to: menuBarSet.appendingPathComponent(name))
+    menuBarEntries.append("""
+        {
+          "filename" : "\(name)",
+          "idiom" : "mac",
+          "scale" : "\(scale)x"
+        }
+    """)
+    print("  \(name)  (\(pixels)px)")
+}
+
+let menuBarContents = """
+{
+  "images" : [
+\(menuBarEntries.joined(separator: ",\n"))
+  ],
+  "info" : {
+    "author" : "xcode",
+    "version" : 1
+  },
+  "properties" : {
+    "template-rendering-intent" : "template"
+  }
+}
+
+"""
+try! menuBarContents.write(to: menuBarSet.appendingPathComponent("Contents.json"), atomically: true, encoding: .utf8)
+print("✓ Sources/Resources/Assets.xcassets/MenuBarIcon.imageset")
 
 // MARK: - README
 

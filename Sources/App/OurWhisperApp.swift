@@ -28,9 +28,28 @@ struct OurWhisperApp: App {
             MenuBarContent()
                 .environment(appState)
         } label: {
-            Image(systemName: appState.recordingState.menuBarSymbol)
-                .accessibilityLabel(appState.recordingState.accessibilityLabel)
+            MenuBarLabel(state: appState.recordingState)
         }
+    }
+}
+
+/// The glyph beside the clock.
+///
+/// A view rather than an inline `Image` because the idle glyph comes out of the asset catalog and
+/// the busy ones are SF Symbols, and a `switch` needs somewhere to live. The frog is left at its
+/// natural 18 points: `MenuBarExtra` hands the label straight to the status item, which does not
+/// resize it, and `.resizable()` here would stretch a template to whatever the bar allowed.
+struct MenuBarLabel: View {
+    let state: AppState.RecordingState
+
+    var body: some View {
+        Group {
+            switch state.menuBarGlyph {
+            case .asset(let name): Image(name)
+            case .symbol(let name): Image(systemName: name)
+            }
+        }
+        .accessibilityLabel(state.accessibilityLabel)
     }
 }
 

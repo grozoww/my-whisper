@@ -47,7 +47,7 @@ And one that follows from them:
 ./scripts/package.sh             # build a distributable DMG, signed so permission survives
 ./scripts/release-cert.sh        # once, ever: the certificate every release is signed with
 ./scripts/screenshots.sh         # redraw docs/images, the README's screenshots
-./scripts/make-icon.swift        # redraw the app icon into Sources/Resources/Assets.xcassets
+./scripts/make-icon.swift        # redraw the app icon and menu bar glyph into Assets.xcassets
 
 OURWHISPER_SECTION=modes open -a OurWhisper   # open the window on a given screen
 ```
@@ -89,7 +89,7 @@ Sources/
     Transcription/  Provider protocol, Parakeet, Soniox, router
     Update/         Release check
     Vocabulary/     Substitution list
-  Resources/    Assets.xcassets — the app icon, drawn by scripts/make-icon.swift
+  Resources/    Assets.xcassets — the app icon and menu bar glyph, drawn by scripts/make-icon.swift
   UI/           One directory per screen, plus DesignSystem
 Tests/          Swift Testing, no network, no key, no permissions
 ```
@@ -162,6 +162,19 @@ no escaping — which is one more reason to prefer it.
 
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
+
+**A menu bar image has to be a template, and nothing tells you when it is not.** The idle glyph is
+the app's own frog from `MenuBarIcon.imageset`, and the `template-rendering-intent` in its
+`Contents.json` is what lets macOS throw the colours away and paint the shape to match the bar it
+lands in. Without it the artwork ships as literal black pixels, which look right in every
+screenshot taken on a light menu bar and disappear on a dark one — and the menu bar follows the
+desktop picture, not the appearance setting, so "it works in Light Mode" proves nothing. Drawing a
+light copy and a dark copy instead has the same fault with more files. `AppBundleTests` checks the
+flag survived, because a template that stopped being one still renders.
+
+The size is the other half: `MenuBarExtra` hands its label straight to the status item, which does
+not resize it. 18 points is what a status item is given, so artwork of any other size arrives at
+that size — and `.resizable()` on the label stretches the template to whatever the bar allows.
 
 **Signing is tied to Accessibility permission.** macOS records the grant against the *designated
 requirement* of the signature, not against the app's bytes or its name. An ad-hoc signature's
