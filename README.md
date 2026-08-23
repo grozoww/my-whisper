@@ -69,6 +69,11 @@ the optional cloud provider instead.
 - **Clipboard as context** — off by default, per mode. When it is on, whatever you have copied is
   shown to the on-device model as reference for spelling names and terms. It is never pasted, and
   a password copied from a password manager is skipped.
+- **Clipboard in the paste** — also off by default, per mode, and the opposite treatment: what you
+  copied is pasted exactly as you copied it. Copy a stack trace, say what you want done about it,
+  and both land in one paste. Say the placeholder — "clipboard content" — and it lands *there*
+  rather than at the end: *"here is the error I keep getting, clipboard content, what does it
+  mean?"*. The model never sees it, so nothing rewrites it.
 - **Vocabulary** — teach it your names, jargon, and spellings. Applied as an exact rule, not a
   hint to a model, so it works every time.
 - **History** — searchable, stored locally, with a retention setting that actually deletes. Keeps
@@ -151,9 +156,10 @@ Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 - No telemetry. No crash reporting. No network calls unless you enable a cloud provider.
 - API keys you paste are stored in the **macOS Keychain**, never in a config file or a log, and
   are only ever sent to that provider.
-- The clipboard is only read to paste, unless you switch on "Use the clipboard as context" in a
-  mode. Then it is read at the moment you start speaking, shown to the on-device model, and
-  dropped — it is never written to history and never sent anywhere.
+- The clipboard is only read to paste, unless a mode has "Use the clipboard as context" or "Paste
+  the clipboard after the text" switched on. Then it is read at the moment you start speaking,
+  used for that one dictation, and dropped — it is never written to history and never sent
+  anywhere. A password copied from a password manager is skipped either way.
 
 ## How cleanup works
 

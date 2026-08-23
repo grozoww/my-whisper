@@ -1,16 +1,21 @@
 import AppKit
 
-/// What is on the clipboard, prepared for the on-device model to read as reference.
+/// What is on the clipboard, and the two shapes the app is allowed to use it in.
 ///
 /// This is the only place the app reads the clipboard for anything other than pasting, so the
-/// limits live here rather than at the call site. Two of them are not negotiable: a clipboard a
-/// password manager marked concealed is never read at all, and what is read only ever reaches the
-/// on-device model. Clipboards hold passwords, keys and other people's private messages — the
-/// feature is worth having only if none of that can leave the Mac.
+/// limits live here rather than at the call site. One of them is not negotiable: a clipboard a
+/// password manager marked concealed is never read at all. Clipboards hold passwords, keys and
+/// other people's private messages — the feature is worth having only if that one never slips.
+///
+/// The two shapes are deliberately different. `reference` goes to the on-device model, capped,
+/// and never comes back out. `appended` goes into the paste verbatim, because a stack trace or a
+/// block of code that has been shortened or reworded is worse than useless — but it goes only
+/// into the field the user was already about to paste into, and nowhere else.
 enum ClipboardContext {
     /// Enough for an email, a stack trace or a page of notes; short enough that the model still
-    /// answers inside its timeout. A copied document would blow both.
-    static let characterLimit = 2000
+    /// answers inside its timeout. A copied document would blow both. This caps what the *model*
+    /// is shown, never what is pasted.
+    static let referenceLimit = 2000
 
     /// Types that mean "this was not meant to be kept". `ConcealedType` is what 1Password and the
     /// other managers set on a copied password; the rest are the same convention for clipboard
@@ -34,11 +39,61 @@ enum ClipboardContext {
         guard let raw = pasteboard.string(forType: .string) else { return nil }
 
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        return trimmed.isEmpty ? nil : trimmed
+    }
 
-        // The head, not the tail: what you copied usually starts with the part you care about,
-        // and the ellipsis tells the model the text stops mid-thought rather than mid-sentence.
-        guard trimmed.count > characterLimit else { return trimmed }
-        return String(trimmed.prefix(characterLimit)) + "…"
+    /// The clipboard as the on-device model sees it: capped, because the model has a timeout.
+    ///
+    /// The head, not the tail: what you copied usually starts with the part you care about, and
+    /// the ellipsis tells the model the text stops mid-thought rather than mid-sentence.
+    static func reference(_ text: String) -> String {
+        guard text.count > referenceLimit else { return text }
+        return String(text.prefix(referenceLimit)) + "…"
+    }
+
+    /// The clipboard as it is pasted: after the dictated text, separated by a blank line, exactly
+    /// as it was copied.
+    ///
+    /// Uncapped and untouched on purpose. The user copied this to paste it; a version the app
+    /// trimmed to fit a model's context window would be a silently corrupted paste, and pressing
+    /// ⌘V themselves would have given them the whole thing.
+    static func appended(_ clipboard: String?, to text: String) -> String {
+        guard let clipboard, !clipboard.isEmpty else { return text }
+        guard !text.isEmpty else { return clipboard }
+        return text + "\n\n" + clipboard
+    }
+
+    /// The clipboard put where the user said it goes.
+    ///
+    /// Saying the placeholder — "clipboard content" unless the mode says otherwise — is how you
+    /// wrap what you copied in a sentence instead of leaving it dangling at the end: *"here is the
+    /// error I keep getting, clipboard content, what does it mean?"*. Every occurrence is
+    /// replaced, because saying it twice means twice.
+    ///
+    /// This is a rule, not a prompt. It runs after the whole refinement pipeline, which is the
+    /// only order that works: showing the model the text it is about to reproduce gets a stack
+    /// trace reworded, and the length check in `OnDeviceRefiner` would throw the answer away for
+    /// growing. The cost of running last is that the model sees the placeholder as ordinary words
+    /// and may reword it — when it has, nothing matches and the clipboard goes to the end, which
+    /// is where it would have gone with no placeholder at all.
+    static func substituted(_ clipboard: String?, into text: String, placeholder: String) -> String {
+        guard let clipboard, !clipboard.isEmpty else { return text }
+
+        let phrase = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !phrase.isEmpty, let regex = RuleRefiner.cachedWordRegex(for: phrase) else {
+            return appended(clipboard, to: text)
+        }
+
+        let range = NSRange(text.startIndex..., in: text)
+        guard regex.firstMatch(in: text, range: range) != nil else {
+            return appended(clipboard, to: text)
+        }
+
+        // Escaped: a clipboard holding "$1" or "\\" is text, not a substitution template.
+        return regex.stringByReplacingMatches(
+            in: text,
+            range: range,
+            withTemplate: NSRegularExpression.escapedTemplate(for: clipboard)
+        )
     }
 }

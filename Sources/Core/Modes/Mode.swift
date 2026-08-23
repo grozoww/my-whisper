@@ -25,6 +25,23 @@ struct Mode: Codable, Identifiable, Equatable, Sendable {
     /// Off everywhere by default — reading the clipboard is something the user asks for.
     var usesClipboardContext: Bool = false
 
+    /// Paste what is on the clipboard after the dictated text, verbatim.
+    ///
+    /// For handing something you copied to whatever you are dictating into: copy a stack trace,
+    /// say what you want done about it, and both arrive in one paste. Separate from
+    /// `usesClipboardContext` because they are opposite treatments of the same text — that one
+    /// shows it to the model and forbids it from repeating any of it, this one never shows it to
+    /// the model at all and reproduces it exactly. Off everywhere by default, for the same reason.
+    var pastesClipboard: Bool = false
+
+    /// The words that stand in for the clipboard in what you say.
+    ///
+    /// Say them and the clipboard lands there instead of at the end, which is what lets you wrap
+    /// a copied block in a sentence. Editable because the phrase has to be one you can say
+    /// comfortably in the language you dictate in, and one you would not say by accident.
+    /// Emptying it means the clipboard always goes at the end.
+    var clipboardPlaceholder: String = "clipboard content"
+
     /// Bundle identifiers this mode claims. When "switch by app" is on, focusing one of these
     /// selects this mode. Empty means the mode is only ever chosen by hand.
     var appBundleIDs: [String] = []
@@ -171,6 +188,8 @@ extension Mode {
         instructions = container.value(.instructions, or: defaults.instructions)
         cleanup = container.value(.cleanup, or: defaults.cleanup)
         usesClipboardContext = container.value(.usesClipboardContext, or: defaults.usesClipboardContext)
+        pastesClipboard = container.value(.pastesClipboard, or: defaults.pastesClipboard)
+        clipboardPlaceholder = container.value(.clipboardPlaceholder, or: defaults.clipboardPlaceholder)
         appBundleIDs = container.value(.appBundleIDs, or: defaults.appBundleIDs)
         isBuiltIn = container.value(.isBuiltIn, or: defaults.isBuiltIn)
     }

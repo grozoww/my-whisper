@@ -39,13 +39,14 @@ final class ModeStore {
         return modes.first ?? Mode.builtIns[0]
     }
 
-    /// Whether anything would use the clipboard if it were read.
+    /// Whether anything would use the clipboard if it were read — as reference for the model, or
+    /// as text to paste.
     ///
-    /// `DictationController` asks before reading it at all, so with every mode's toggle off the
+    /// `DictationController` asks before reading it at all, so with every mode's toggles off the
     /// app never touches the clipboard except to paste — which is the claim the feature has to be
     /// able to make.
-    var anyModeUsesClipboardContext: Bool {
-        modes.contains(where: \.usesClipboardContext)
+    var anyModeReadsClipboard: Bool {
+        modes.contains { $0.usesClipboardContext || $0.pastesClipboard }
     }
 
     // MARK: - Editing

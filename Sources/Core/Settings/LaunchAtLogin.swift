@@ -17,30 +17,35 @@ enum LaunchAtLogin {
     private static let log = Logger(subsystem: "com.grozoww.ourwhisper", category: "login")
 
     /// What macOS will do at the next login, as macOS sees it.
+    ///
+    /// Every read is an XPC round trip to the background task daemon — a few milliseconds. Read it
+    /// into state; never from a SwiftUI body, which is evaluated far more often than this changes.
     static var status: SMAppService.Status { SMAppService.mainApp.status }
 
     static var isEnabled: Bool { status == .enabled }
 
-    /// `true` if the system state now matches what was asked for.
+    /// `nil` when the system state now matches what was asked for, or a sentence saying why not.
     ///
     /// Registration can fail for reasons the user has to fix themselves — most often because they
     /// previously switched the item off in System Settings, which macOS reports as
-    /// `.requiresApproval` and refuses to override from code. `explanation` says which it was.
+    /// `.requiresApproval` and refuses to override from code. The switch snapping silently back
+    /// is not an answer, so the reason comes back with it and the row says it out loud.
     @discardableResult
-    static func set(_ enabled: Bool) -> Bool {
+    static func set(_ enabled: Bool) -> String? {
         do {
             if enabled {
                 // Registering an already-registered app throws rather than doing nothing.
-                guard status != .enabled else { return true }
+                guard status != .enabled else { return nil }
                 try SMAppService.mainApp.register()
             } else {
-                guard status != .notRegistered else { return true }
+                guard status != .notRegistered else { return nil }
                 try SMAppService.mainApp.unregister()
             }
-            return isEnabled == enabled
+            guard isEnabled != enabled else { return nil }
+            return "macOS did not \(enabled ? "add" : "remove") the login item. Do it by hand in System Settings › General › Login Items."
         } catch {
             log.error("Could not \(enabled ? "register" : "unregister") the login item: \(error.localizedDescription, privacy: .public)")
-            return false
+            return "macOS refused: \(error.localizedDescription) Add OurWhisper by hand in System Settings › General › Login Items."
         }
     }
 
@@ -56,8 +61,11 @@ enum LaunchAtLogin {
             "OurWhisper starts with your Mac. It opens straight to the menu bar, with no window."
         case .requiresApproval:
             "macOS has this switched off. Turn OurWhisper on in System Settings › General › Login Items — it cannot be re-enabled from here."
-        case .notFound:
-            "Available once OurWhisper is in your Applications folder. A copy running from anywhere else cannot register a login item."
+        // `.notFound` is not "the app is in the wrong place": it is also what an app that has
+        // simply never registered reports, and registering from that state works. Treating it as
+        // an error is what left the switch greyed out on a correctly installed copy.
+        case .notFound, .notRegistered:
+            "Start OurWhisper at login so the hotkey works without opening anything first."
         default:
             "Start OurWhisper at login so the hotkey works without opening anything first."
         }

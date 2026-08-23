@@ -121,10 +121,29 @@ fast and do not add work to them.
 **The clipboard has to be read before the paste, not after.** `TextInjector` pastes through the
 clipboard, so by the time cleanup runs the user's clipboard is already the dictated text.
 `DictationController.beginRecording` reads it alongside the paste target, for the same reason, and
-it only reads it at all when some mode has "Use the clipboard as context" on — that condition is
-what lets the README say the clipboard is otherwise only touched to paste. `ClipboardContext` is
-the single place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`,
-which is what a password manager sets on a copied password.
+it only reads it at all when some mode has "Use the clipboard as context" or "Paste the clipboard
+after the text" on — `ModeStore.anyModeReadsClipboard` is that condition, and it is what lets the
+README say the clipboard is otherwise only touched to paste. `ClipboardContext` is the single
+place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`, which is
+what a password manager sets on a copied password.
+
+**The two clipboard toggles are opposite treatments of the same text.** Context shows it to the
+on-device model, capped at `ClipboardContext.referenceLimit`, with a prompt forbidding the model
+from repeating any of it. Paste never shows the model anything and reproduces the clipboard
+verbatim after the dictated text — uncapped, because a copied stack trace the app quietly
+shortened would be worse than not pasting it. Keep the capping on `ClipboardContext.reference`,
+not on the read: the read result is what gets pasted. History records what was dictated, not the
+combined paste, so a thirty-day history file never accumulates copies of the user's clipboard.
+
+**The clipboard placeholder is substituted last, and that ordering is the whole design.**
+`ClipboardContext.substituted` runs after rules *and* after the model, because the one thing the
+model must never see is the text it is about to reproduce — it rewords a stack trace, and
+`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×. The price is
+that the model sees the placeholder as ordinary words and can reword it, so a miss falls back to
+appending at the end rather than losing the clipboard. Match with
+`RuleRefiner.cachedWordRegex(for:)` — a hand-rolled `\b` here would fire inside Cyrillic — and
+escape the clipboard with `NSRegularExpression.escapedTemplate(for:)`, or a copied `$1` becomes a
+capture reference.
 
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
@@ -172,7 +191,7 @@ wide row overflows the window with no scroll bar and no reflow — `ModesView` a
 use a plain `HStack` with an explicit list width for that reason. And a row whose text column has
 no minimum width loses the negotiation entirely: `SettingsRow` used to let its label shrink to
 nothing, which turned "Symbol" into one letter per line in a narrow mode editor. It now measures
-with `ViewThatFits` and drops the control onto its own line instead. The window's `minWidth` is the
+in `SettingsRowLayout` and drops the control onto its own line instead. The window's `minWidth` is the
 other half of that: it is set to what the widest screen actually needs, and lowering it puts the
 squeeze back.
 
@@ -198,6 +217,30 @@ Both workflows pass `fetch-depth: 0` for that reason. Major and minor stay a han
 — keep it equal to `VERSION`, but do not treat it as the source of truth. Getting this wrong ships
 an app that reports an older version than the release it came from, and `UpdateChecker` then
 offers every user an update to what they are already running.
+
+**`ViewThatFits` builds every candidate, and a settings page is one view.** Both halves matter
+together. `SettingsRow` used to state its two arrangements as `ViewThatFits { sideBySide;
+stacked }`, which is the clearest way to write it and meant every row built two copies of its
+control — a `Picker` is expensive to build. And because a whole settings screen is a single
+SwiftUI view reading one observed `Settings` value, flipping any switch re-renders every row on
+it. Measured: 105 ms per change on Configuration, which is a toggle animating at about five
+frames a second. `SettingsRowLayout` measures each subview once instead, and the same change now
+costs 23 ms. If a screen ever feels slow again, measure a re-render before guessing — render
+`RootView` in a test, change an observed value, and time `layoutSubtreeIfNeeded`.
+
+**Nothing in a SwiftUI body may ask the system a question.** `LaunchAtLogin.status` is an XPC
+round trip to the background task daemon (~3 ms) and `KeychainStore.has` is one to securityd; both
+were being read from `body`, where they ran several times per render. Read them into `@State` on
+appear and refresh them when something changes them. The same goes for `AudioDevices.inputs()`,
+which costs ~65 ms — `SoundView` already loads it in a `.task`, and `AppState.inputDeviceName`
+only calls it when the user has pinned a device.
+
+**`SMAppService` reports `.notFound` for an app that has simply never registered.** It does not
+mean the app is in the wrong place. The login-item switch used to disable itself on that status
+and tell the user to move the app to /Applications, which left it greyed out on a correctly
+installed copy; registering from `.notFound` works, and only `.requiresApproval` is a state code
+cannot get out of. A self-signed app with no Team ID registers fine — verified by registering and
+unregistering one.
 
 **Launch at login is not a setting.** `LaunchAtLogin` reads `SMAppService.mainApp.status` every
 time. Persisting it in `Settings` would create a second source of truth that drifts the moment
