@@ -14,13 +14,13 @@ final class AppState {
         case formatting
         case failed(String)
 
-        var menuBarSymbol: String {
+        var menuBarGlyph: MenuBarGlyph {
             switch self {
-            case .idle: "mic"
-            case .listening: "mic.fill"
-            case .transcribing: "waveform"
-            case .formatting: "sparkles"
-            case .failed: "exclamationmark.triangle.fill"
+            case .idle: .asset(MenuBarGlyph.frog)
+            case .listening: .symbol("mic.fill")
+            case .transcribing: .symbol("waveform")
+            case .formatting: .symbol("sparkles")
+            case .failed: .symbol("exclamationmark.triangle.fill")
             }
         }
 
@@ -33,6 +33,20 @@ final class AppState {
             case .failed(let message): "OurWhisper, error: \(message)"
             }
         }
+    }
+
+    /// What the menu bar draws. Idle is the app's own mark, because that is the state the icon
+    /// sits in all day and a generic microphone up there could belong to anything; the busy
+    /// states stay SF Symbols, because once the app is doing something, what it is doing matters
+    /// more than whose app it is.
+    enum MenuBarGlyph: Equatable {
+        /// The frog, drawn by `scripts/make-icon.swift` into `Assets.xcassets` as a template
+        /// image. A name that does not resolve draws nothing whatsoever — no placeholder, no
+        /// warning, just a gap in the menu bar — which is what `AppBundleTests` guards.
+        static let frog = "MenuBarIcon"
+
+        case asset(String)
+        case symbol(String)
     }
 
     var selectedSection: NavigationSection = .home
