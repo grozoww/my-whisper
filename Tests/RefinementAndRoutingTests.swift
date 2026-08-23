@@ -17,6 +17,7 @@ struct SchemaEvolutionTests {
 
         #expect(settings.dictation.language == .russian)
         #expect(settings.dictation.provider == .parakeet)      // defaulted
+        #expect(settings.dictation.pushToTalkHoldDelay == 1)   // defaulted
         #expect(settings.sound.feedbackVolume == 0.25)
         #expect(settings.sound.playFeedbackSounds == true)     // defaulted
         #expect(settings.history.retention == .days30)         // whole section defaulted
@@ -185,6 +186,78 @@ struct SpeechLanguageTests {
     func autoSendsNoHint() {
         #expect(SpeechLanguage.auto.hints.isEmpty)
         #expect(SpeechLanguage.polish.hints == ["pl"])
+    }
+}
+
+/// The fn key is the default hold-to-talk key and macOS also uses a *tap* of it to switch input
+/// source. These cover the only thing that separates the two gestures: how long the key is down.
+@Suite("Hold-to-talk delay")
+@MainActor
+struct PushToTalkDelayTests {
+    /// Collects what the monitor reported, so a test can assert on a sequence rather than on a
+    /// single flag.
+    @MainActor
+    private final class Recorder {
+        var events: [HotkeyMonitor.Event] = []
+    }
+
+    private func monitor(delay: Duration) -> (HotkeyMonitor, Recorder) {
+        let monitor = HotkeyMonitor()
+        let recorder = Recorder()
+        monitor.onEvent = { recorder.events.append($0) }
+        monitor.configure(toggle: nil, pushToTalk: .fn, holdDelay: delay)
+        return (monitor, recorder)
+    }
+
+    private func press(_ monitor: HotkeyMonitor, _ flags: CGEventFlags) {
+        _ = monitor.decide(type: .flagsChanged, keyCode: 0, flags: flags)
+    }
+
+    @Test("A tap shorter than the delay never starts a recording")
+    func tapIsIgnored() async throws {
+        let (monitor, recorder) = monitor(delay: .milliseconds(200))
+
+        press(monitor, .maskSecondaryFn)
+        press(monitor, [])
+        try await Task.sleep(for: .milliseconds(350))
+
+        // Not even a pressEnd: nothing started, so there is nothing to finish, and a stray
+        // pressEnd would stop whatever the toggle chord had started.
+        #expect(recorder.events.isEmpty)
+    }
+
+    @Test("A hold past the delay starts, and releasing it finishes")
+    func holdStartsAndStops() async throws {
+        let (monitor, recorder) = monitor(delay: .milliseconds(150))
+
+        press(monitor, .maskSecondaryFn)
+        #expect(recorder.events.isEmpty)
+
+        try await Task.sleep(for: .milliseconds(350))
+        #expect(recorder.events == [.pressStart])
+
+        press(monitor, [])
+        #expect(recorder.events == [.pressStart, .pressEnd])
+    }
+
+    @Test("A zero delay is the old behaviour: down starts it")
+    func zeroDelayStartsAtOnce() {
+        let (monitor, recorder) = monitor(delay: .zero)
+
+        press(monitor, .maskSecondaryFn)
+        #expect(recorder.events == [.pressStart])
+    }
+
+    @Test("Holding the key past the delay reports one start, not one per event")
+    func repeatedFlagEventsStartOnce() async throws {
+        let (monitor, recorder) = monitor(delay: .milliseconds(100))
+
+        press(monitor, .maskSecondaryFn)
+        press(monitor, .maskSecondaryFn)
+        try await Task.sleep(for: .milliseconds(300))
+        press(monitor, .maskSecondaryFn)
+
+        #expect(recorder.events == [.pressStart])
     }
 }
 

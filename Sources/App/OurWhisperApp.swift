@@ -76,8 +76,14 @@ enum WindowPresenter {
     /// Bring a window forward from an accessory app. `openWindow` alone is not enough: an
     /// accessory app is not in the activation order, so the window would appear behind whatever
     /// the user was using.
+    ///
+    /// The policy is left alone when the Dock icon is off. Switching to `.regular` here is what
+    /// put the app in the Dock for as long as its window was open, whatever the toggle in
+    /// Configuration said — and the toggle then read as broken rather than as the preference it
+    /// is. An accessory app can hold a key window and take keyboard input perfectly well; it just
+    /// has to be told to activate, which is the line below.
     static func activate() {
-        NSApp.setActivationPolicy(.regular)
+        if showsDockIcon { NSApp.setActivationPolicy(.regular) }
         NSApp.activate(ignoringOtherApps: true)
 
         // Ordering the window front explicitly matters on first launch: the scene exists from

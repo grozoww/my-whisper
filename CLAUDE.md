@@ -285,6 +285,14 @@ installed copy; registering from `.notFound` works, and only `.requiresApproval`
 cannot get out of. A self-signed app with no Team ID registers fine — verified by registering and
 unregistering one.
 
+**Bringing a window forward is not the same as wanting a Dock icon.** `WindowPresenter.activate`
+used to set `.regular` unconditionally, so the app appeared in the Dock for as long as its window
+was open no matter what "Show in the Dock" said — and the switch read as broken rather than as the
+preference it is. An accessory app can hold a key window, take keyboard input, and run its menu
+key equivalents (⌘W, ⌘Q, ⌘V in a text field all work — verified) without a Dock icon; it only has
+to be told to activate. What it does *not* get is the menu bar at the top of the screen, which
+keeps showing whichever regular app was in front. That is the whole cost of the toggle being off.
+
 **Launch at login is not a setting.** `LaunchAtLogin` reads `SMAppService.mainApp.status` every
 time. Persisting it in `Settings` would create a second source of truth that drifts the moment
 someone switches the login item off in System Settings, and the toggle would then lie about what
