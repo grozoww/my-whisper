@@ -83,17 +83,30 @@ enum WindowPresenter {
         // Ordering the window front explicitly matters on first launch: the scene exists from
         // launch, but an accessory app's window is not in the activation order, so without this
         // the app appears not to have started at all.
-        for window in NSApp.windows where !(window is NSPanel) {
-            window.makeKeyAndOrderFront(nil)
-        }
+        mainWindow(among: NSApp.windows)?.makeKeyAndOrderFront(nil)
     }
 
     /// Drop back to accessory once the last window closes, so we leave the Dock and the
     /// command-tab list again.
     static func resignIfNoWindows() {
         guard !showsDockIcon else { return }
-        guard NSApp.windows.allSatisfy({ !$0.isVisible || $0 is NSPanel }) else { return }
+        guard mainWindow(among: NSApp.windows)?.isVisible != true else { return }
         NSApp.setActivationPolicy(.accessory)
+    }
+
+    /// The app's own window, picked out of everything AppKit keeps in `NSApp.windows`.
+    ///
+    /// That list is not only ours. It also holds the status item's window and — once the menu bar
+    /// menu has been opened even once — the backing window of the dismissed menu, and both are
+    /// plain `NSWindow`s, so skipping panels does not skip them. Ordering the menu's window front
+    /// is what left a blank rounded rectangle sitting beside the menu bar after every visit to
+    /// Settings, and counting the status item's window as "still open" is why the app never went
+    /// back to being an accessory. Both of them float above the ordinary window level, which is
+    /// what the fallback matches on; the scene's window sits at `.normal` and carries the scene
+    /// id with it.
+    static func mainWindow(among windows: [NSWindow]) -> NSWindow? {
+        windows.first { $0.identifier?.rawValue == WindowID.main }
+            ?? windows.first { !($0 is NSPanel) && $0.level == .normal }
     }
 
     static func setShowsDockIcon(_ shows: Bool) {
