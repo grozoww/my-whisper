@@ -63,7 +63,10 @@ struct UpdateCheckerTests {
         try! JSONSerialization.data(withJSONObject: release(overrides))
     }
 
-    /// The shape the app actually receives: GitHub's releases list, newest first.
+    /// The shape the app actually receives: GitHub's releases list, in whatever order it feels
+    /// like. Fixtures here are deliberately not sorted — a sorted one passes even when the code
+    /// reads the list positionally, which is exactly how that bug survived a test called
+    /// "the newest finished release is the one offered".
     private func releaseListJSON(_ releases: [[String: Any]]) -> Data {
         try! JSONSerialization.data(withJSONObject: releases)
     }
@@ -97,16 +100,52 @@ struct UpdateCheckerTests {
 
     @Test("The newest finished release in the list is the one offered")
     func picksNewestFinishedRelease() throws {
-        // A rehearsal build is a prerelease and sorts ahead of the finished releases. Taking the
-        // first entry regardless is what would offer everyone a build nobody merged.
+        // A rehearsal build is a prerelease and can sit anywhere in the list. Taking the first
+        // entry regardless is what would offer everyone a build nobody merged — and the finished
+        // entries are out of order here so that taking the first *finished* one fails too.
         let data = releaseListJSON([
             release(["tag_name": "release-1.0.9-abc1234", "prerelease": true]),
+            release(["tag_name": "v1.0.6"]),
             release(["tag_name": "v1.0.8", "draft": true]),
             release(["tag_name": "v1.0.7"]),
-            release(["tag_name": "v1.0.6"]),
         ])
         let found = try #require(UpdateChecker.parse(data))
         #expect(found.version == "1.0.7")
+    }
+
+    @Test("The release list is not read positionally")
+    func ignoresTheOrderGitHubReturns() throws {
+        // This is the real `GET /releases` response for this repository, tags and flags verbatim.
+        // GitHub documents no order and returns none: 1.0.9 comes back ahead of 1.0.12, 1.0.11 and
+        // 1.0.10, matching neither `id`, `created_at` nor `published_at`. Reading the first
+        // finished entry told everyone on 1.0.11 that 1.0.9 was the newest release, which is not
+        // newer, so the app reported itself up to date through four consecutive releases.
+        let data = releaseListJSON([
+            release(["tag_name": "release-1.0.9-38ea901"]),
+            release(["tag_name": "release-1.0.8-71f957b"]),
+            release(["tag_name": "release-1.0.12-0c56a0f"]),
+            release(["tag_name": "release-1.0.11-345a4a1"]),
+            release(["tag_name": "release-1.0.10-9a20a36"]),
+            release(["tag_name": "release-1.0.7-bc71101", "prerelease": true]),
+            release(["tag_name": "build-10", "prerelease": true]),
+        ])
+
+        let found = try #require(UpdateChecker.parse(data))
+        #expect(found.version == "1.0.12")
+        #expect(UpdateChecker.isVersion(found.version, newerThan: "1.0.11"))
+    }
+
+    @Test("Ten sorts above nine, in the list as well as in the comparison")
+    func picksTenOverNine() throws {
+        // The same trap `scripts/install.sh` needs `sort -V` for: plain string order puts 1.0.9
+        // above 1.0.10, so a list whose highest version is a two-digit patch is the case that
+        // catches a comparison done on strings.
+        let data = releaseListJSON([
+            release(["tag_name": "v1.0.9"]),
+            release(["tag_name": "v1.0.10"]),
+        ])
+        let found = try #require(UpdateChecker.parse(data))
+        #expect(found.version == "1.0.10")
     }
 
     @Test("A list with nothing finished in it offers nothing")
