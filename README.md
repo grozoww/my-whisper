@@ -131,9 +131,9 @@ so read it before you run it.
 
 Prefer to do it by hand: download the DMG from
 [Releases](https://github.com/grozoww/my-whisper/releases), drag OurWhisper to Applications, then
-**right-click it and choose Open**, once. Every release says whether it is notarized. Pushes to
-`main` refresh a rolling `latest` prerelease, so there is always a current build to download; tags
-produce versioned releases.
+**right-click it and choose Open**, once. Every release says whether it is notarized. Every push to
+`main` adds a prerelease, so there is always a current build to download and older ones stay where
+they were; tags produce versioned releases.
 
 OurWhisper then asks for Microphone and Accessibility permission, and both are required: the
 microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.

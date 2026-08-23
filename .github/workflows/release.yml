@@ -5,11 +5,11 @@ name: Release
 on:
   push:
     tags: ['v*']
-    # Every push to main refreshes a single rolling prerelease tagged `latest`, so there is always
-    # a DMG to download and `scripts/install.sh` has something to find without anyone cutting a
-    # tag. Versioned releases still come from tags, and this never overwrites one: the rolling
-    # build has a tag of its own and is marked prerelease, so GitHub keeps showing the newest real
-    # release as the latest.
+    # Every push to main publishes its own prerelease, tagged with the version and the commit it
+    # was built from, so there is always a current DMG to download without anyone cutting a tag.
+    # Each one is kept: nothing is deleted and no tag is reused, so an older build stays
+    # downloadable after a newer one lands. `scripts/install.sh` reads the releases list and takes
+    # the newest build that carries a DMG, so it follows along on its own.
     branches: [main]
   # Lets you produce a downloadable build before you have an Apple Developer account, and lets you
   # rehearse the whole thing without cutting a tag.
@@ -20,16 +20,15 @@ on:
         type: boolean
         default: false
 
-# A second push to main while the first is still packaging would race to move the same tag.
+# Two pushes to main packaging at once would each build the same repository at a different commit
+# and publish within seconds of each other. They no longer collide over a tag, but serialising them
+# keeps the release list in the order the commits actually landed.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
   contents: write
-
-env:
-  ROLLING_TAG: latest
 
 jobs:
   release:
@@ -146,28 +145,17 @@ jobs:
             "$VERSION" "$BUILD" "$SHA" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" "$GITHUB_SHA" \
             > release-notes.md
           if [ "${{ github.ref_type }}" != "tag" ]; then
-            cat >> release-notes.md <<'ROLLING'
-          > **Rolling build.** Rebuilt from `main` on every push, so this tag moves and its
-          > contents change. For something that stays put, use a versioned release.
+            cat >> release-notes.md <<'UNTAGGED'
+          > **Build from `main`.** Published on every push, ahead of any version tag. This tag and
+          > its files never change, but the line it comes from is still moving — for a version
+          > someone decided to cut, use a release tagged `v…`.
 
-          ROLLING
+          UNTAGGED
           fi
           if [ -f dist/INSTALL.md ]; then
             cat dist/INSTALL.md >> release-notes.md
             printf '\n---\n\n' >> release-notes.md
           fi
-
-      # The rolling tag is reused, so last push's DMG is still attached to it. Assets are matched
-      # by filename and the filename carries the version, so a version bump would otherwise leave
-      # two DMGs on one release and install.sh could pick either. Deleting the release outright is
-      # the only way to be sure exactly one build is attached.
-      - name: Clear the previous rolling build
-        # Pushes to main only. A manual run publishes to a build-<n> tag of its own, and must not
-        # take the rolling release down with it.
-        if: github.event_name == 'push' && github.ref_type != 'tag'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release delete "$ROLLING_TAG" --yes --cleanup-tag || true
 
       - name: Publish
         uses: softprops/action-gh-release@v3
@@ -178,20 +166,25 @@ jobs:
             dist/SHA256SUMS
           body_path: release-notes.md
           generate_release_notes: true
-          # A tag push keeps its own tag. A push to main reuses one rolling tag, so main builds
-          # stay a single release rather than accumulating one per commit. workflow_dispatch gets a
-          # run number, so a rehearsal collides with neither.
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && env.ROLLING_TAG || format('build-{0}', github.run_number)) }}
+          # A tag push keeps its own tag. A push to main is tagged with what the build is called,
+          # which carries the version and the commit — unique per commit, so each build is added
+          # to the releases list rather than replacing the one before it. workflow_dispatch gets a
+          # run number, so two rehearsals of the same commit do not collide.
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || (github.event_name == 'push' && env.RELEASE_NAME || format('build-{0}', github.run_number)) }}
           # release-1.0.3-a1b2c3d, whatever the trigger — the version and the commit are what
           # anyone reading the list actually wants, and the tag above already says which kind of
           # build it is. A manual run adds its run number, because two rehearsals of the same
           # commit would otherwise be two releases with identical names.
           name: ${{ github.event_name == 'workflow_dispatch' && format('{0} (build {1})', env.RELEASE_NAME, github.run_number) || env.RELEASE_NAME }}
           target_commitish: ${{ github.sha }}
-          # Anything that is not a notarized tag is a prerelease, so GitHub keeps pointing people
-          # at the newest real release rather than at whatever main happens to contain today.
-          prerelease: ${{ env.NOTARIZED == 'false' || github.ref_type != 'tag' }}
-          make_latest: ${{ github.ref_type == 'tag' && env.NOTARIZED == 'true' }}
+          # A version tag is a finished release; everything else is a build from main. Notarization
+          # deliberately does not enter into it — it decides whether Gatekeeper complains about the
+          # download, not whether the maintainer has finished the release. Tying the two together
+          # marked *every* release a prerelease, since there is no Apple Developer account here,
+          # and `/releases/latest` skips prereleases — so the app's update check answered 404 and
+          # quietly told everyone they were up to date, for ever.
+          prerelease: ${{ github.ref_type != 'tag' }}
+          make_latest: ${{ github.ref_type == 'tag' }}
 
       - name: Clean up keychain
         if: always() && env.SIGNED == 'true'

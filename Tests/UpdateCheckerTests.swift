@@ -29,7 +29,7 @@ struct UpdateCheckerTests {
 
     // MARK: - Parsing
 
-    private func releaseJSON(_ overrides: [String: Any] = [:]) -> Data {
+    private func release(_ overrides: [String: Any] = [:]) -> [String: Any] {
         var object: [String: Any] = [
             "tag_name": "v0.2.0",
             "name": "Modes and history",
@@ -40,7 +40,16 @@ struct UpdateCheckerTests {
             "prerelease": false,
         ]
         object.merge(overrides) { _, new in new }
-        return try! JSONSerialization.data(withJSONObject: object)
+        return object
+    }
+
+    private func releaseJSON(_ overrides: [String: Any] = [:]) -> Data {
+        try! JSONSerialization.data(withJSONObject: release(overrides))
+    }
+
+    /// The shape the app actually receives: GitHub's releases list, newest first.
+    private func releaseListJSON(_ releases: [[String: Any]]) -> Data {
+        try! JSONSerialization.data(withJSONObject: releases)
     }
 
     @Test("A published release parses, with the v stripped")
@@ -64,6 +73,72 @@ struct UpdateCheckerTests {
         #expect(release.title == "v0.2.0")
     }
 
+    @Test("The newest finished release in the list is the one offered")
+    func picksNewestFinishedRelease() throws {
+        // Every build published before a version tag is cut is a prerelease, and they sort ahead
+        // of the real release. Taking the first entry regardless is what would offer everyone a
+        // half-finished build from main.
+        let data = releaseListJSON([
+            release(["tag_name": "release-1.0.9-abc1234", "prerelease": true]),
+            release(["tag_name": "v1.0.8", "draft": true]),
+            release(["tag_name": "v1.0.7"]),
+            release(["tag_name": "v1.0.6"]),
+        ])
+        let found = try #require(UpdateChecker.parse(data))
+        #expect(found.version == "1.0.7")
+    }
+
+    @Test("A list with nothing finished in it offers nothing")
+    func listOfOnlyPrereleases() {
+        let data = releaseListJSON([
+            release(["tag_name": "release-1.0.9-abc1234", "prerelease": true]),
+            release(["tag_name": "release-1.0.8-def5678", "prerelease": true]),
+        ])
+        #expect(UpdateChecker.parse(data) == nil)
+    }
+
+    @Test("A repository whose every release is a prerelease reads as up to date, not as an error")
+    @MainActor
+    func treatsUnfinishedReleasesAsUpToDate() async {
+        // This is the state the project is actually in until a version tag is cut. Reporting it
+        // as a failure — or as "no usable tag_name" — is what made the Check button look broken.
+        let data = releaseListJSON([release(["tag_name": "release-99.0.0-abc1234", "prerelease": true])])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: data))])
+        let checker = UpdateChecker(http: stub)
+
+        let state = await checker.check()
+        guard case .upToDate = state else {
+            Issue.record("expected up to date, got \(state)")
+            return
+        }
+    }
+
+    @Test("An empty releases list reads as up to date")
+    @MainActor
+    func treatsEmptyListAsUpToDate() async {
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: Data("[]".utf8)))])
+        let checker = UpdateChecker(http: stub)
+
+        let state = await checker.check()
+        guard case .upToDate = state else {
+            Issue.record("expected up to date, got \(state)")
+            return
+        }
+    }
+
+    @Test("A response that is not JSON is reported as a failure")
+    @MainActor
+    func reportsUnreadableResponse() async {
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: Data("<html>nope</html>".utf8)))])
+        let checker = UpdateChecker(http: stub)
+
+        let state = await checker.check()
+        guard case .failed = state else {
+            Issue.record("expected a failure state, got \(state)")
+            return
+        }
+    }
+
     @Test("Malformed JSON returns nil rather than throwing")
     func handlesGarbage() {
         #expect(UpdateChecker.parse(Data("not json".utf8)) == nil)
@@ -75,7 +150,7 @@ struct UpdateCheckerTests {
     @Test("A newer release is reported as available")
     @MainActor
     func reportsAvailableRelease() async {
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 200, body: releaseJSON(["tag_name": "v99.0.0"])))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: releaseListJSON([release(["tag_name": "v99.0.0"])])))])
         let checker = UpdateChecker(http: stub)
 
         let state = await checker.check()
@@ -89,7 +164,7 @@ struct UpdateCheckerTests {
     @Test("A skipped version is not offered again")
     @MainActor
     func honoursSkippedVersion() async {
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 200, body: releaseJSON(["tag_name": "v99.0.0"])))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: releaseListJSON([release(["tag_name": "v99.0.0"])])))])
         let checker = UpdateChecker(http: stub)
 
         let state = await checker.check(skippedVersion: "99.0.0")
@@ -102,7 +177,7 @@ struct UpdateCheckerTests {
     @Test("Checking manually overrides a skip")
     @MainActor
     func forceOverridesSkip() async {
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 200, body: releaseJSON(["tag_name": "v99.0.0"])))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: releaseListJSON([release(["tag_name": "v99.0.0"])])))])
         let checker = UpdateChecker(http: stub)
 
         let state = await checker.check(skippedVersion: "99.0.0", force: true)
@@ -117,7 +192,7 @@ struct UpdateCheckerTests {
     func sendsNothingIdentifying() async throws {
         // README.md promises this check is not telemetry. The promise is only kept if the request
         // says nothing about the user or this Mac.
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 200, body: releaseJSON()))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 200, body: releaseJSON()))])
         let checker = UpdateChecker(http: stub)
         _ = await checker.check()
 
@@ -133,7 +208,7 @@ struct UpdateCheckerTests {
     func treatsMissingReleasesAsUpToDate() async {
         // Before the first release, GitHub answers 404. Reporting that as a failure would tell
         // every early user their update check is broken.
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 404, body: Data(#"{"message":"Not Found"}"#.utf8)))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 404, body: Data(#"{"message":"Not Found"}"#.utf8)))])
         let checker = UpdateChecker(http: stub)
 
         let state = await checker.check()
@@ -146,7 +221,7 @@ struct UpdateCheckerTests {
     @Test("A network failure is reported, not swallowed")
     @MainActor
     func reportsFailure() async {
-        let stub = StubHTTPClient(script: [("/releases/latest", .init(status: 503, body: Data()))])
+        let stub = StubHTTPClient(script: [("/releases", .init(status: 503, body: Data()))])
         let checker = UpdateChecker(http: stub)
 
         let state = await checker.check()

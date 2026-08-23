@@ -276,9 +276,13 @@ and macOS refuses to open them until the quarantine flag is cleared — which is
 install.sh exists to do. Signing and notarizing are deliberately separate decisions in both
 `package.sh` and the workflow: a self-signed certificate cannot be notarized, but it is what keeps
 the Accessibility grant alive across updates, and treating the two as one flag is what made every
-release ad-hoc. A pull request builds
-the DMG in CI; a push to main publishes it to a rolling `latest` prerelease; a tag cuts a versioned
-release. Every one of them is named `release-<version>-<short sha>`.
+release ad-hoc. The same mistake one level up is what broke the update check: every release was
+marked a prerelease because none was notarized, `/releases/latest` skips prereleases, and the app
+read the resulting 404 as "up to date". Notarization decides whether Gatekeeper complains, not
+whether a release is finished — a `v*` tag is what decides that. A pull request builds the DMG in
+CI; a push to main adds a prerelease of its own, tagged `release-<version>-<short sha>` so nothing
+is ever replaced; a tag cuts a versioned release. Every one of them is *named*
+`release-<version>-<short sha>`.
 
 **A dependency.** It must be pinned to an exact version, `Package.resolved` must be committed in
 the same change, and `./scripts/audit-deps.sh` must pass. Two traps found the hard way, both

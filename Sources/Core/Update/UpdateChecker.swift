@@ -28,10 +28,17 @@ final class UpdateChecker {
         let publishedAt: Date?
     }
 
-    /// Version parsing and comparison are pure functions of their input, so they are marked
-    /// `nonisolated` — the surrounding type is `@MainActor` for its observable state, and there is
-    /// no reason for a string comparison to need the main thread to run or a test to reach it.
-    private static let endpoint = URL(string: "https://api.github.com/repos/grozoww/my-whisper/releases/latest")!
+    /// The list of releases, newest first — deliberately *not* `/releases/latest`.
+    ///
+    /// That endpoint only ever answers with a release GitHub itself considers the latest, which
+    /// means it skips prereleases. There is no Apple Developer account behind this project, so
+    /// every build published before a version tag is cut is marked a prerelease — and the endpoint
+    /// therefore answered 404, which this type reads as "up to date". The check was silently
+    /// finding nothing, for ever. `scripts/install.sh` reads this same list for the same reason.
+    ///
+    /// No query string, so the request stays something anyone can verify says nothing about them —
+    /// see `sendsNothingIdentifying`. GitHub's default page of 30 is far more than enough.
+    private static let endpoint = URL(string: "https://api.github.com/repos/grozoww/my-whisper/releases")!
 
     private let log = Logger(subsystem: "com.grozoww.ourwhisper", category: "update")
     private let http: any HTTPClient
@@ -78,8 +85,17 @@ final class UpdateChecker {
                 throw HTTPError.from(status: response.statusCode, body: data)
             }
 
-            guard let release = Self.parse(data) else {
-                throw HTTPError.malformedResponse("release JSON had no usable tag_name")
+            guard let json = try? JSONSerialization.jsonObject(with: data) else {
+                throw HTTPError.malformedResponse("the releases list was not JSON")
+            }
+
+            // A readable list with nothing finished in it is an ordinary state — every release so
+            // far is a prerelease — and not the same thing as a response we could not read. Only
+            // the latter is worth telling the user about.
+            guard let release = Self.newestFinishedRelease(in: json) else {
+                state = .upToDate(checkedAt: Date())
+                log.info("Update check: no finished release published yet")
+                return state
             }
 
             let isNewer = Self.isVersion(release.version, newerThan: Self.currentVersion)
@@ -96,10 +112,28 @@ final class UpdateChecker {
     }
 
     // MARK: - Parsing
+    //
+    // Parsing and version comparison are pure functions of their input, so they are `nonisolated`
+    // — the surrounding type is `@MainActor` for its observable state, and there is no reason for
+    // a string comparison to need the main thread to run or a test to reach it.
 
+    /// Takes either the releases list or a single release object, so the same parsing covers the
+    /// list endpoint above and a hand-fetched release.
     nonisolated static func parse(_ data: Data) -> Release? {
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tag = json["tag_name"] as? String,
+        (try? JSONSerialization.jsonObject(with: data)).flatMap(newestFinishedRelease(in:))
+    }
+
+    /// The first release in the list that is finished — GitHub returns them newest first, so the
+    /// first one that qualifies is the newest one on offer.
+    nonisolated static func newestFinishedRelease(in json: Any) -> Release? {
+        if let list = json as? [[String: Any]] {
+            return list.lazy.compactMap(release(from:)).first
+        }
+        return (json as? [String: Any]).flatMap(release(from:))
+    }
+
+    nonisolated private static func release(from json: [String: Any]) -> Release? {
+        guard let tag = json["tag_name"] as? String,
               let urlString = json["html_url"] as? String,
               let url = URL(string: urlString)
         else { return nil }
