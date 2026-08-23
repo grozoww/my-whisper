@@ -160,6 +160,18 @@ Escape the clipboard with `NSRegularExpression.escapedTemplate(for:)` on the reg
 copied `$1` becomes a capture reference. The marker path is a plain string replacement and needs
 no escaping — which is one more reason to prefer it.
 
+**"Is there a text field here?" can only be answered in one direction.** A frontmost app with no
+caret swallows the synthetic ⌘V without a word, and the restore 220 ms later puts the user's old
+clipboard back over the text — which is how a dictation into a Finder window used to disappear
+behind a green tick and the word "Finder". `TextInjector.focusedElementAcceptsText` asks the
+focused Accessibility element whether `kAXSelectedText` is settable, and that answer is acted on
+only when it is *no*: the paste is still posted, and all that changes is that the clipboard is not
+restored. Gating the ⌘V on a *yes* would break dictation everywhere it matters most — Chromium and
+Electron expose one `AXWebArea` for a whole page rather than an element per input, which is also
+why `AXWebArea` is in `textRoles`. The check runs at inject time and not in `captureTarget`,
+because that runs inside the event tap callback and a round trip to another process there is
+exactly what makes macOS switch the tap off.
+
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
 
@@ -388,7 +400,7 @@ anything depending on `mlx-swift` 0.31.5+ needs Xcode's separately-downloaded Me
 
 ## Testing
 
-Swift Testing, not XCTest. 119 tests, no network, no API key, no microphone, no permissions.
+Swift Testing, not XCTest. 157 tests, no network, no API key, no microphone, no permissions.
 
 - Cloud providers are tested against `StubHTTPClient` with recorded response shapes.
 - Every screen is built and laid out in `ViewRenderingTests` — a view that crashes on

@@ -8,6 +8,11 @@ import OSLog
 /// because showing a window — even a non-activating one — can change what `frontmostApplication`
 /// reports. Paste then goes through the clipboard, because that is the only method every app
 /// honours; direct Accessibility insertion is tried as a fallback for the apps that block it.
+///
+/// Going through the clipboard is also why "nowhere to paste" is a case at all. A frontmost app
+/// with no caret in it swallows the ⌘V and says nothing, and the restore that follows puts the
+/// user's old clipboard back over the text — so a dictation into a Finder window used to vanish
+/// with a tick and the word "Finder" on the pill. `clipboardOnly` is that case handled.
 @MainActor
 final class TextInjector {
     enum Method: String, Sendable {
@@ -81,10 +86,21 @@ final class TextInjector {
 
     // MARK: - Injection
 
+    /// Puts the text where it belongs and says how it got there.
+    ///
+    /// `keepWhenNothingFocused` is `DictationSettings.keepOnClipboardWhenNothingFocused`, and it
+    /// only ever decides whether the *restore* happens. The keystroke is posted either way.
     @discardableResult
-    func inject(_ text: String) async throws -> Method {
+    func inject(_ text: String, keepWhenNothingFocused: Bool) async throws -> Method {
         guard !text.isEmpty else { return .paste }
-        guard let target = capturedTarget else { throw InjectionError.noTarget }
+
+        guard let target = capturedTarget else {
+            // Nothing was frontmost at all, so there is no app to activate and no field to reach.
+            // The clipboard is the only place left that is better than dropping the text.
+            guard keepWhenNothingFocused else { throw InjectionError.noTarget }
+            writeToClipboard(text)
+            return .clipboardOnly
+        }
 
         // The user may have switched apps while we transcribed. Put their original app back in
         // front, otherwise the text lands somewhere they were not looking.
@@ -94,12 +110,22 @@ final class TextInjector {
             try? await Task.sleep(for: .milliseconds(60))
         }
 
+        // Asked before the clipboard is touched, so the answer is about the field the user was in
+        // rather than about anything the paste left behind.
+        let nowhereToPaste = keepWhenNothingFocused && !focusedElementAcceptsText()
+
         let saved = PasteboardSnapshot.capture()
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        writeToClipboard(text)
 
         if postPasteKeystroke() {
+            // The keystroke went out regardless — `focusedElementAcceptsText` is not trusted
+            // enough to cancel a paste. What changes is that the old clipboard does not come back
+            // over the top of text that had nowhere to land.
+            guard !nowhereToPaste else {
+                log.debug("Nothing focused took the text; left on the clipboard")
+                return .clipboardOnly
+            }
+
             // Restore in the background so the caller is not blocked on the delay.
             Task { [saved] in
                 try? await Task.sleep(for: Self.clipboardRestoreDelay)
@@ -158,6 +184,51 @@ final class TextInjector {
         )
         return status == .success
     }
+
+    private func writeToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+
+    /// Whether the element that had focus can take text.
+    ///
+    /// Trusted in one direction only, and the asymmetry is deliberate. A `false` is acted on —
+    /// it is what a Finder window, a PDF in Preview, or a desktop with nothing focused looks
+    /// like, and being wrong costs the user a clipboard the app did not put back. A `false` must
+    /// never *stop* the ⌘V: Chromium and Electron hand out one `AXWebArea` for a whole page
+    /// instead of an element per input, so gating the paste on this would break dictation in
+    /// every browser and every Electron app. `AXWebArea` counts as text for the same reason —
+    /// not because a page is a text field, but because a browser will not tell us which part of
+    /// it has the caret.
+    ///
+    /// Asked here and not in `captureTarget`, which runs inside the event tap callback: a round
+    /// trip to another process there is exactly the work that makes macOS switch the tap off.
+    private func focusedElementAcceptsText() -> Bool {
+        guard let element = capturedElement else { return false }
+
+        var settable = DarwinBoolean(false)
+        if AXUIElementIsAttributeSettable(element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+           settable.boolValue {
+            return true
+        }
+
+        // Plenty of apps decline to call the attribute settable and still accept a paste, so the
+        // role gets a say before the answer is no.
+        var role: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role) == .success,
+              let name = role as? String
+        else { return false }
+        return Self.textRoles.contains(name)
+    }
+
+    /// Roles that mean a paste has somewhere to go.
+    private static let textRoles: Set<String> = [
+        "AXTextField",
+        "AXTextArea",
+        "AXComboBox",
+        "AXWebArea",
+    ]
 }
 
 /// A copy of the clipboard deep enough to put back exactly what was there — every item, every
