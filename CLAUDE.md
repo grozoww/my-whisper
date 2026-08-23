@@ -307,10 +307,17 @@ the Accessibility grant alive across updates, and treating the two as one flag i
 release ad-hoc. The same mistake one level up is what broke the update check: every release was
 marked a prerelease because none was notarized, `/releases/latest` skips prereleases, and the app
 read the resulting 404 as "up to date". Notarization decides whether Gatekeeper complains, not
-whether a release is finished — a `v*` tag is what decides that. A pull request builds the DMG in
-CI; a push to main adds a prerelease of its own, tagged `release-<version>-<short sha>` so nothing
-is ever replaced; a tag cuts a versioned release. Every one of them is *named*
-`release-<version>-<short sha>`.
+whether a release is finished — a `v*` tag is what decides that. A pull request builds and tests
+but does not package; a push to main adds a prerelease of its own, tagged
+`release-<version>-<short sha>` so nothing is ever replaced; a tag cuts a versioned release. Every
+one of them is *named* `release-<version>-<short sha>`.
+
+The DMG is checked where it ships, not on the branch. `package.sh` exits zero on an image that is
+subtly wrong — an asset catalog that failed to compile leaves the app with no icon — so
+`release.yml` mounts the image and checks the app, the icon and the signature *before* Publish. A
+failure there means no release is created, rather than one `UpdateChecker` goes on to offer people.
+Packaging on every pull request checked a DMG nobody would download and cost five macOS minutes a
+run; this replaces it.
 
 **A dependency.** It must be pinned to an exact version, `Package.resolved` must be committed in
 the same change, and `./scripts/audit-deps.sh` must pass. Two traps found the hard way, both

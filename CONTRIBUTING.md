@@ -261,7 +261,7 @@ first thing anyone asks when a download misbehaves.
 
 | Trigger | Tag | Name |
 | --- | --- | --- |
-| Pull request | — | A DMG as a CI artifact. Nothing published. |
+| Pull request | — | Nothing published. Builds and tests only — no packaging. |
 | Push to `main` | `release-1.0.3-a1b2c3d`, a prerelease of its own | `release-1.0.3-a1b2c3d` |
 | Push a tag `v*` | the tag. Notarized if the signing secrets are set | `release-1.0.3-a1b2c3d` |
 | Actions → Run workflow | `build-<n>`, with an "unsigned" checkbox for rehearsing | `release-1.0.3-a1b2c3d (build 7)` |
@@ -338,9 +338,18 @@ a machine this app cannot run on anyway.
 
 ## Pull requests
 
-CI builds and tests every PR on a macOS runner with `CODE_SIGNING_ALLOWED=NO`, and packages a DMG
-with `--unsigned`. Neither needs a secret, so a fork's PR runs exactly as ours does. The release
-workflow is separate and main-repo only, so a fork PR can never reach the signing certificate.
+CI builds and tests every PR on a macOS runner with `CODE_SIGNING_ALLOWED=NO`. That needs no
+secret, so a fork's PR runs exactly as ours does. The release workflow is separate and main-repo
+only, so a fork PR can never reach the signing certificate.
+
+PRs do not package a DMG. A Release-config break — signing, hardened runtime, asset catalog,
+arm64-only — fails `release.yml` at `package.sh`, before anything is published, so a build that
+cannot be made cannot ship. What that does not catch is an image that builds *and is wrong*, since
+`package.sh` exits zero on one; so the checks that the image mounts, holds the app, has an icon and
+verifies its signature run in `release.yml` too, against the bytes actually being uploaded.
+
+To try a branch as a real app, run the release workflow manually against it with the "unsigned" box
+ticked. It publishes under a `build-<n>` tag of its own, so it collides with nothing.
 
 The Xcode project uses **synchronized file groups**: a new file under `Sources/` joins the target
 automatically, so you never edit `project.pbxproj` and PRs do not conflict in it.

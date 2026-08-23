@@ -135,6 +135,24 @@ jobs:
         if: env.SIGNED == 'false'
         run: ./scripts/package.sh --unsigned
 
+      # These checks used to live on the pull request, where they inspected a DMG nobody would ever
+      # download. A build that succeeds can still be wrong — an asset catalog that failed to compile
+      # leaves the app with no icon, and a signature can be invalid without package.sh returning
+      # non-zero. Neither makes package.sh exit non-zero, so without this the broken image is simply
+      # published. Running it here, before Publish, is what stops that: the checks see the exact
+      # bytes being uploaded, and a failure means no release is created at all rather than one that
+      # UpdateChecker will go on to offer people.
+      - name: Check the disk image mounts and holds the app
+        run: |
+          MOUNT="$(hdiutil attach dist/*.dmg -nobrowse -readonly -mountrandom /tmp \
+            | grep -o '/tmp/[^[:space:]]*$' | tail -1)"
+          test -d "$MOUNT/OurWhisper.app" || { echo "::error::No OurWhisper.app in the DMG."; exit 1; }
+          # An app icon that failed to compile is invisible until someone looks in the Dock.
+          test -f "$MOUNT/OurWhisper.app/Contents/Resources/AppIcon.icns" \
+            || { echo "::error::The app icon is missing. Run ./scripts/make-icon.swift."; exit 1; }
+          codesign --verify --strict --verbose=2 "$MOUNT/OurWhisper.app"
+          hdiutil detach "$MOUNT" -quiet
+
       # An unsigned download that refuses to open, with no explanation, reads as broken software.
       # package.sh writes the wording; this puts it where the person downloading will see it.
       - name: Assemble release notes
