@@ -177,9 +177,15 @@ final class DictationController {
         injector.captureTarget()
 
         // Read now, for the same reason: this is the clipboard the user had when they started
-        // talking, and by the time the text is pasted the injector will have overwritten it. The
-        // check means a user with both toggles off everywhere never has their clipboard read.
-        clipboardContext = modes.anyModeReadsClipboard ? ClipboardContext.current() : nil
+        // talking, and by the time the text is pasted the injector will have overwritten it.
+        //
+        // Two conditions, and both have to hold before the pasteboard is touched at all. Some mode
+        // has to want it, and the on-device model has to be able to run — every use of the
+        // clipboard goes through the model now, so with the model off reading it would be reading
+        // it for nothing. Asked of the injector rather than of the pasteboard, because a transcript
+        // the last dictation deliberately left there is not something the user copied.
+        let modelCanRun = refinement.modelIsEnabled(settings.settings.refinement)
+        clipboardContext = modelCanRun && modes.anyModeReadsClipboard ? injector.userClipboard() : nil
 
         do {
             try capture.start(deviceUID: settings.settings.sound.inputDeviceUID)
@@ -247,9 +253,7 @@ final class DictationController {
 
             // The pill only says "cleaning up" when something slow is actually happening. Rules
             // finish in microseconds, and a flash of a stage nobody waited for reads as jitter.
-            let willUseModel = current.refinement.isEnabled
-                && current.refinement.useOnDeviceModel
-                && !mode.instructions.isEmpty
+            let willUseModel = refinement.willUseModel(current.refinement, mode: mode)
             if willUseModel {
                 phase = .formatting
                 pill.setPhase(.formatting)
@@ -266,9 +270,14 @@ final class DictationController {
 
             // The clipboard goes in after cleanup, never through it: this is text the user copied
             // to paste, and a model that reworded a stack trace would have ruined the point. It
-            // lands where the placeholder was spoken, or at the end when it was not.
-            let pasted = mode.pastesClipboard
-                ? ClipboardContext.substituted(clipboard, into: refined.text, placeholder: mode.clipboardPlaceholder)
+            // lands on the marker the model left, and nowhere else — no marker, nothing pasted.
+            //
+            // `willUseModel` gates it because the marker is the only thing that knows where the
+            // clipboard goes. A dictation the model never touched — Raw mode, or the model
+            // switched off — cannot have one, and this saves reaching into `substituted` to find
+            // that out.
+            let pasted = willUseModel && mode.pastesClipboard
+                ? ClipboardContext.substituted(clipboard, into: refined.text)
                 : refined.text
 
             let method = try await injector.inject(
@@ -282,7 +291,11 @@ final class DictationController {
             // outlive the paste by a month for no benefit the user asked for.
             record(
                 raw: result.text,
-                final: refined.text,
+                // History records what was dictated, and `[[CLIPBOARD]]` is not something anybody
+                // said — it is how the position reached the paste. Taken back out here, punctuation
+                // and all, so the entry reads as a sentence rather than as an internal token. What
+                // the user actually said is still on the entry, in `rawText`.
+                final: ClipboardContext.removingMarker(from: refined.text),
                 mode: mode,
                 transcription: result,
                 usedModel: refined.usedModel,
@@ -359,7 +372,9 @@ final class DictationController {
 
     private func showPill(_ phase: PillModel.Phase) {
         guard settings.settings.appearance.showPill else { return }
-        pill.show()
+        // The target was captured a moment ago, so this is the app the user is looking at — which
+        // is what decides the display the pill goes on.
+        pill.show(focusedIn: injector.targetProcessIdentifier)
         pill.setPhase(phase)
     }
 
@@ -374,7 +389,9 @@ final class DictationController {
         playFeedback(settings.settings.sound.errorSound)
         // `show()` resets the model, so the phase has to be set after it — the other way round
         // and the pill spends its 2.5 seconds showing audio bars instead of the error.
-        pill.show()
+        // Asked of the workspace rather than of the injector: this is reachable before a target
+        // has been captured, and the previous dictation's app is not where the user is now.
+        pill.show(focusedIn: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         pill.setPhase(.failure(message))
         pill.dismiss(after: .seconds(2.5))
         Task {

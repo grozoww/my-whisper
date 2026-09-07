@@ -72,9 +72,14 @@ the optional cloud provider instead.
   a password copied from a password manager is skipped.
 - **Clipboard in the paste** — also off by default, per mode, and the opposite treatment: what you
   copied is pasted exactly as you copied it. Copy a stack trace, say what you want done about it,
-  and both land in one paste. Say the placeholder — "clipboard content" — and it lands *there*
-  rather than at the end: *"here is the error I keep getting, clipboard content, what does it
-  mean?"*. The model never sees it, so nothing rewrites it.
+  and both land in one paste. Ask for it mid-sentence, in whatever words you would use — *"here is
+  the error I keep getting, paste the clipboard, what does it mean?"* — and it lands *there*. There
+  is no phrase to configure and no language to pick: the on-device model works out where you meant
+  it, and it still never sees what you copied, so nothing rewrites it. Say nothing about the
+  clipboard and nothing is pasted, so the switch can stay on.
+
+  Both of these need the on-device model, and neither does anything without it — with the model
+  off the app does not read your clipboard at all.
 - **Vocabulary** — teach it your names, jargon, and spellings. Applied as an exact rule, not a
   hint to a model, so it works every time.
 - **History** — searchable, stored locally, with a retention setting that actually deletes. Keeps
@@ -157,8 +162,9 @@ Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 - No telemetry. No crash reporting. No network calls unless you enable a cloud provider.
 - API keys you paste are stored in the **macOS Keychain**, never in a config file or a log, and
   are only ever sent to that provider.
-- The clipboard is only read to paste, unless a mode has "Use the clipboard as context" or "Paste
-  the clipboard after the text" switched on. Then it is read at the moment you start speaking,
+- The clipboard is only read to paste, unless the on-device model is on *and* a mode has "Use the
+  clipboard as context" or "Paste the clipboard where you ask for it" switched on. Then it is read at the
+  moment you start speaking,
   used for that one dictation, and dropped — it is never written to history and never sent
   anywhere. A password copied from a password manager is skipped either way.
 - Pasting borrows the clipboard and puts back what was there, with one exception: if there was no
