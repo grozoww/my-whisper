@@ -47,7 +47,7 @@ final class RefinementPipeline {
             cleaned,
             instructions: mode.instructions,
             context: mode.usesClipboardContext ? clipboard.map(ClipboardContext.reference) : nil,
-            placeClipboard: Self.shouldPlaceClipboard(mode: mode, clipboard: clipboard, spoken: cleaned),
+            placeClipboard: Self.shouldPlaceClipboard(mode: mode, clipboard: clipboard),
             timeout: .seconds(max(1, settings.modelTimeoutSeconds))
         )
 
@@ -75,24 +75,63 @@ final class RefinementPipeline {
     /// either of them could do, and `DictationController` does not read the clipboard at all
     /// rather than reading it and finding no use for it.
     func modelIsEnabled(_ settings: RefinementSettings) -> Bool {
-        settings.isEnabled && settings.useOnDeviceModel && onDevice.availability.isAvailable
+        Self.modelIsEnabled(
+            isEnabled: settings.isEnabled,
+            useOnDeviceModel: settings.useOnDeviceModel,
+            modelIsAvailable: onDevice.availability.isAvailable
+        )
     }
 
     /// The same question for one dictation. A mode with no instructions skips the model — Raw is
     /// the shipped example — and skips the clipboard with it.
     func willUseModel(_ settings: RefinementSettings, mode: Mode) -> Bool {
-        modelIsEnabled(settings) && !mode.instructions.isEmpty
+        Self.willUseModel(
+            isEnabled: settings.isEnabled,
+            useOnDeviceModel: settings.useOnDeviceModel,
+            modelIsAvailable: onDevice.availability.isAvailable,
+            instructions: mode.instructions
+        )
     }
 
-    /// Whether to ask the model where the clipboard goes.
+    /// The two above, as the arithmetic without the dependency.
     ///
-    /// The model is asked *where*, never *whether* it was asked for. Without the last condition a
-    /// model that decided the sentence would read better with something dropped into it would drop
-    /// the clipboard mid-thought, and the end of the text — where it lands when nobody asked for a
-    /// position — is the safer place to be wrong.
-    static func shouldPlaceClipboard(mode: Mode, clipboard: String?, spoken: String) -> Bool {
-        guard mode.pastesClipboard, let clipboard, !clipboard.isEmpty else { return false }
-        return ClipboardContext.mentioned(in: spoken)
+    /// Pure because the instance versions read `onDevice.availability`, which a test cannot set —
+    /// and a CI runner has no Apple Intelligence, so every assertion against them passes for the
+    /// wrong reason. This is the decision that keeps the app off the user's pasteboard; it has to
+    /// be assertable on a machine that does not have the model.
+    nonisolated static func modelIsEnabled(
+        isEnabled: Bool,
+        useOnDeviceModel: Bool,
+        modelIsAvailable: Bool
+    ) -> Bool {
+        isEnabled && useOnDeviceModel && modelIsAvailable
+    }
+
+    nonisolated static func willUseModel(
+        isEnabled: Bool,
+        useOnDeviceModel: Bool,
+        modelIsAvailable: Bool,
+        instructions: String
+    ) -> Bool {
+        modelIsEnabled(
+            isEnabled: isEnabled,
+            useOnDeviceModel: useOnDeviceModel,
+            modelIsAvailable: modelIsAvailable
+        ) && !instructions.isEmpty
+    }
+
+    /// Whether to ask the model where the clipboard goes. There is nothing to weigh: if the mode
+    /// pastes the clipboard and there is one, the model is asked.
+    ///
+    /// There used to be a word list here — the transcript had to contain "clipboard", "буфер" and
+    /// so on before the request went in the prompt, on the argument that the model should decide
+    /// *where* and never *whether*. That argument stopped holding once a missing marker meant the
+    /// clipboard was not pasted at all: a list of nouns then decides, silently, that "paste what I
+    /// copied" is not a request, and the user's clipboard never arrives. A list can only be wrong
+    /// in that direction, and the prompt already tells the model to write nothing when the
+    /// sentence was not asking. The whether is the model's too.
+    nonisolated static func shouldPlaceClipboard(mode: Mode, clipboard: String?) -> Bool {
+        mode.pastesClipboard && !(clipboard ?? "").isEmpty
     }
 }
 

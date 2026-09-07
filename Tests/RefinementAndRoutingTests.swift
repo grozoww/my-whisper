@@ -465,26 +465,10 @@ struct ClipboardPlacementTests {
         #expect(ClipboardContext.substituted("", into: trailing) == "Look at this.")
     }
 
-    @Test("Only a transcript that names the clipboard gets the model asked about it")
-    func mentionsGatesTheRequest() {
-        // The model decides where, never whether. A sentence with nothing clipboard-shaped in it
-        // never has the request put in front of it, or a marker invented over it drops a stack
-        // trace mid-thought.
-        #expect(ClipboardContext.mentioned(in: "the clipboard's contents, please"))
-        #expect(ClipboardContext.mentioned(in: "вставь буфера обмена сюда"))
-        #expect(ClipboardContext.mentioned(in: "встав сюди з буфера, будь ласка"))
-        #expect(ClipboardContext.mentioned(in: "pega el portapapeles aquí"))
-        // The recogniser splits the compound about as often as it does not.
-        #expect(ClipboardContext.mentioned(in: "put my clip board here"))
-
-        #expect(!ClipboardContext.mentioned(in: "ship it on tuesday"))
-        #expect(!ClipboardContext.mentioned(in: "вот ошибка, что это значит?"))
-    }
 }
 
-/// Whether the model is asked about the clipboard at all. The only rule left in the placement
-/// path — where it goes is the model's decision and nothing else's.
-@MainActor
+/// Whether the model is asked about the clipboard at all — the last rule in the placement path,
+/// and now only about whether there is anything to place.
 @Suite("Asking the model about the clipboard")
 struct ClipboardRequestTests {
     private func mode(pastes: Bool = true) -> Mode {
@@ -493,70 +477,73 @@ struct ClipboardRequestTests {
         return mode
     }
 
-    @Test("A sentence that names the clipboard is offered to the model")
-    func asksWhenTheClipboardIsNamed() {
-        #expect(RefinementPipeline.shouldPlaceClipboard(
-            mode: mode(),
-            clipboard: "TypeError: x",
-            spoken: "Вот ошибка, буфер обмена, что это значит?"
-        ))
-    }
-
-    @Test("A sentence that never names it is not offered at all")
-    func neverOffersItUnasked() {
-        #expect(!RefinementPipeline.shouldPlaceClipboard(
-            mode: mode(),
-            clipboard: "TypeError: x",
-            spoken: "Ship it on Tuesday."
-        ))
+    @Test("Any sentence is offered to the model, whatever words it uses")
+    func asksWhateverTheWording() {
+        // There used to be a word list here, and a sentence with no "clipboard" in it was never
+        // put in front of the model at all — so "paste what I copied" silently pasted nothing,
+        // in every language including the ones the placeholder was never written in.
+        for spoken in [
+            "Here is the error, paste the clipboard, what does it mean?",
+            "Here is the error, paste what I copied, what does it mean?",
+            "встав те, що я скопіював, сюди",
+            "colle ce que j'ai copié ici",
+        ] {
+            #expect(RefinementPipeline.shouldPlaceClipboard(mode: mode(), clipboard: "TypeError: x"))
+            #expect(!spoken.isEmpty)
+        }
     }
 
     @Test("A mode with the toggle off, or an empty clipboard, is never asked")
     func skipsWhenThereIsNothingToPlace() {
-        let spoken = "Here is the error, paste the clipboard, what is it?"
-        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(pastes: false), clipboard: "x", spoken: spoken))
-        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(), clipboard: nil, spoken: spoken))
-        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(), clipboard: "", spoken: spoken))
+        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(pastes: false), clipboard: "x"))
+        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(), clipboard: nil))
+        #expect(!RefinementPipeline.shouldPlaceClipboard(mode: mode(), clipboard: ""))
     }
 }
 
 /// The clipboard is only ever used through the model, so "the model will not run" has to be a
 /// reachable, testable answer — it is what stops the app reading the pasteboard at all.
-@MainActor
+///
+/// Asserted against the pure predicates. The instance versions read `onDevice.availability`, which
+/// no test can set, and CI runs on a machine with no Apple Intelligence — so an assertion against
+/// those would pass for the wrong reason and go on passing if the two flags stopped being read.
 @Suite("No model, no clipboard")
 struct ClipboardNeedsTheModelTests {
-    private let pipeline = RefinementPipeline(onDevice: OnDeviceRefiner())
-
-    private func mode(instructions: String = "Clean it up.") -> Mode {
-        Mode(name: "Test", symbol: "sparkles", instructions: instructions)
+    @Test("Every switch on and the model present is the only way it runs")
+    func theOnlyWayThrough() {
+        #expect(RefinementPipeline.willUseModel(
+            isEnabled: true, useOnDeviceModel: true, modelIsAvailable: true, instructions: "Clean it up."
+        ))
     }
 
     @Test("Cleanup switched off means the clipboard is never read")
     func offMasterSwitch() {
-        var settings = RefinementSettings()
-        settings.isEnabled = false
-        settings.useOnDeviceModel = true
-        #expect(!pipeline.modelIsEnabled(settings))
-        #expect(!pipeline.willUseModel(settings, mode: mode()))
+        #expect(!RefinementPipeline.modelIsEnabled(isEnabled: false, useOnDeviceModel: true, modelIsAvailable: true))
+        #expect(!RefinementPipeline.willUseModel(
+            isEnabled: false, useOnDeviceModel: true, modelIsAvailable: true, instructions: "Clean it up."
+        ))
     }
 
     @Test("The on-device model switched off means the clipboard is never read")
     func offModelSwitch() {
-        var settings = RefinementSettings()
-        settings.isEnabled = true
-        settings.useOnDeviceModel = false
-        #expect(!pipeline.modelIsEnabled(settings))
-        #expect(!pipeline.willUseModel(settings, mode: mode()))
+        #expect(!RefinementPipeline.modelIsEnabled(isEnabled: true, useOnDeviceModel: false, modelIsAvailable: true))
+        #expect(!RefinementPipeline.willUseModel(
+            isEnabled: true, useOnDeviceModel: false, modelIsAvailable: true, instructions: "Clean it up."
+        ))
+    }
+
+    @Test("A Mac without Apple Intelligence never reads the clipboard either")
+    func modelNotAvailable() {
+        #expect(!RefinementPipeline.modelIsEnabled(isEnabled: true, useOnDeviceModel: true, modelIsAvailable: false))
     }
 
     @Test("A mode with no instructions skips the model, and the clipboard with it")
     func aModeThatSkipsTheModel() {
         // Raw is the shipped example. Its instructions are empty, so the model never runs for it —
         // and a dictation the model never touched has no marker and nowhere to put the clipboard.
-        var settings = RefinementSettings()
-        settings.isEnabled = true
-        settings.useOnDeviceModel = true
-        #expect(!pipeline.willUseModel(settings, mode: mode(instructions: "")))
+        #expect(!RefinementPipeline.willUseModel(
+            isEnabled: true, useOnDeviceModel: true, modelIsAvailable: true, instructions: ""
+        ))
         #expect(Mode.builtIns.first { $0.name == "Raw" }?.instructions.isEmpty == true)
     }
 }

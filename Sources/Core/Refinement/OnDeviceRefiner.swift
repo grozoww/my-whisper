@@ -146,14 +146,15 @@ final class OnDeviceRefiner {
             """
         } ?? ""
 
-        // Offered only when the user already said something clipboard-shaped — see
-        // `ClipboardContext.mentioned`, which is what stops this becoming an invitation to invent
-        // a position. Where is the model's decision and nothing else's: what the user says is
-        // *spoken*, so it arrives declined, split by the recogniser, or reworded, and no phrase
-        // written down in advance survives that. What comes back is a literal, not a number: a
-        // small model asked for a character offset guesses, and an offset that is wrong by four
-        // splits a word. The model is still never shown the clipboard here — the marker stands in
-        // for text it does not get to see.
+        // Offered whenever the mode pastes the clipboard and there is one, so the last sentence
+        // below is load-bearing: it is the only veto on placing a marker in a sentence that was
+        // not asking. It lives here rather than in a word list because what the user says is
+        // *spoken* — it arrives declined, split by the recogniser, or reworded — and a list of
+        // nouns can only be wrong by refusing a real request, silently, in whichever language it
+        // was not written in. What comes back is a literal, not a number: a small model asked for
+        // a character offset guesses, and an offset that is wrong by four splits a word. The model
+        // is still never shown the clipboard here — the marker stands in for text it does not get
+        // to see.
         let placement = placeClipboard ? """
 
 

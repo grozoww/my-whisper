@@ -156,21 +156,27 @@ model must never see is the text it is about to reproduce — it rewords a stack
 `OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×. It is a plain
 string replacement, so nothing in the clipboard is read as regex syntax.
 
-Three things hold that together. It is only *asked for* when `ClipboardContext.mentioned` says the
-transcript names the clipboard at all — the model decides where, never whether, or a sentence that
-never mentioned it gets the clipboard dropped into the middle of it. `mentioned` is a list of
-stems, matched as substrings across every language the app is used in, and loose on purpose: it
-only decides whether to ask, and the prompt tells the model to write nothing when the sentence was
-only *about* the clipboard. When no marker comes back — the model declined, timed out, or failed
-its sanity check — **nothing is pasted**. There used to be a fallback that put the clipboard after
-the text in that case, and it fired on every dictation the model was not asked or did not answer,
-so a mode with the switch on stapled whatever was copied onto sentences that never mentioned it.
-The marker is the only thing that knows where the clipboard goes; no answer beats the wrong place,
-and it is what lets the switch stay on. And a marker with no clipboard behind it is taken back out
-by `removingMarker`,
-punctuation and all, rather than pasted as `[[CLIPBOARD]]` — including on the way into History,
-which records the sentence rather than the token. What the user actually said is still on the
-entry, in `rawText`.
+**The *whether* is the model's too, and that reversed a rule this file used to state.** The request
+used to go in the prompt only when `ClipboardContext.mentioned` found a clipboard noun in the
+transcript, on the argument that the model should decide where and never whether — otherwise a
+sentence that never mentioned the clipboard gets one dropped into the middle of it. That argument
+stopped holding the moment a missing marker meant the clipboard was not pasted *at all*: a list of
+nouns then decides, silently, that "paste what I copied" is not a request, and the user's clipboard
+never arrives. A word list can only be wrong in that direction, in every language, and the shipped
+list managed to reject the worked example in `ClipboardContext`'s own doc comment. The prompt
+already tells the model to write nothing when the sentence was only *about* the clipboard, so the
+veto lives there, once, where the judgement is. `shouldPlaceClipboard` is now only "does this mode
+paste the clipboard, and is there one".
+
+When no marker comes back — the model declined, timed out, or failed its sanity check —
+**nothing is pasted**. There used to be a fallback that put the clipboard after the text in that
+case, and it fired on every dictation the model was not asked or did not answer, so a mode with the
+switch on stapled whatever was copied onto sentences that never mentioned it. The marker is the
+only thing that knows where the clipboard goes; no answer beats the wrong place, and it is what
+lets the switch stay on. A marker with no clipboard behind it is taken back out by
+`removingMarker`, punctuation and all, rather than pasted as `[[CLIPBOARD]]` — including on the way
+into History, which records the sentence rather than the token. What the user actually said is
+still on the entry, in `rawText`.
 
 **No model, no clipboard, and that includes not reading it.** Both clipboard toggles are downstream
 of the model — one shows it what you copied, the other pastes it where the model marked — so

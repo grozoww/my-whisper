@@ -25,29 +25,6 @@ enum ClipboardContext {
     /// a small model copies most reliably, and no dictated sentence contains them by accident.
     static let marker = "[[CLIPBOARD]]"
 
-    /// Words that mean the transcript is talking about the clipboard at all.
-    ///
-    /// This is the only gate, and it decides one thing: whether the model is *asked* where the
-    /// clipboard goes. Loose on purpose, and safe to be — the model still judges, and its prompt
-    /// can still decline. What is not safe is a rule deciding where to cut: the placeholder is
-    /// *spoken*, so it arrives reworded, declined, reordered or split by the recogniser, and every
-    /// phrase list written to catch that either missed the sentence or cut open a sentence that
-    /// only mentioned the clipboard. Judging that is the model's job and nothing else's.
-    ///
-    /// Stems rather than whole words, matched as substrings, because "буфера", "clipboard's" and
-    /// "Zwischenablage" all have to count.
-    private static let stems = [
-        "clipboard",
-        "clip board",
-        "буфер",
-        "portapapeles",
-        "zwischenablage",
-        "presse-papier",
-        "schowek",
-        "剪贴板",
-        "クリップボード",
-    ]
-
     /// Types that mean "this was not meant to be kept". `ConcealedType` is what 1Password and the
     /// other managers set on a copied password; the rest are the same convention for clipboard
     /// managers, and anything wearing one of them is exactly what must not end up in a prompt.
@@ -117,19 +94,6 @@ enum ClipboardContext {
         // A plain string replacement, so nothing in the clipboard is read as regex syntax — and a
         // text with no marker in it comes back exactly as it went in.
         return text.replacingOccurrences(of: marker, with: clipboard, options: .caseInsensitive)
-    }
-
-    /// True when what the user said plausibly names the clipboard at all.
-    ///
-    /// This is what decides whether the model is asked for the marker in the first place. The
-    /// model gets to say *where* the clipboard goes, never *whether* it was asked for: a marker
-    /// invented over a sentence that never mentioned the clipboard would drop it mid-thought,
-    /// which is worse than the end.
-    ///
-    /// The precise judgement is the model's job; this only rules out the sentences where there is
-    /// nothing to judge.
-    static func mentioned(in text: String) -> Bool {
-        stems.contains { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 
     /// Takes out a marker that has nothing to stand for, and closes the gap it leaves.
