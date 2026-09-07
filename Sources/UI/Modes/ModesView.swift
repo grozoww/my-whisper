@@ -167,29 +167,26 @@ private struct ModeEditor: View {
                     "doc.on.clipboard",
                     $draft.usesClipboardContext
                 )
+                .disabled(!modelIsAvailable)
             }
 
             SettingsSection(
                 title: "Clipboard",
-                subtitle: "For handing something you copied to the app you are dictating into."
+                subtitle: modelIsAvailable
+                    ? "For handing something you copied to the app you are dictating into. Needs the on-device model, which works out where in your sentence you asked for it."
+                    : "Needs the on-device model, which is what works out where in your sentence you asked for the clipboard. \(appState.onDeviceRefiner.availability.explanation)"
             ) {
                 toggle(
-                    "Paste the clipboard with the text",
-                    "Copy a stack trace or a message, say what you want done about it, and both arrive in one paste — exactly as it was copied. The model never sees it and never rewrites it, it never leaves the Mac, it is not kept in History, and a password copied from a password manager is skipped.",
+                    "Paste the clipboard where you ask for it",
+                    "Copy a stack trace or a message, say what you want done about it, and both arrive in one paste — exactly as it was copied. Ask for it mid-sentence, in any language and any wording, and it lands right there. Say nothing about it and nothing is pasted, so this can stay on. The model never sees what you copied and never rewrites it, it never leaves the Mac, it is not kept in History, and a password copied from a password manager is skipped.",
                     "doc.on.clipboard.fill",
                     $draft.pastesClipboard
                 )
-                RowDivider()
-                SettingsRow(
-                    symbol: "text.insert",
-                    title: "Say this to place it",
-                    detail: "Speak these words and the clipboard is pasted there instead of at the end — \"here is the error, clipboard content, what does it mean?\". Pick something you would not say by accident. Empty means it always goes at the end."
-                ) {
-                    TextField("clipboard content", text: $draft.clipboardPlaceholder)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(minWidth: 110, idealWidth: 200, maxWidth: 200)
-                        .disabled(!draft.pastesClipboard)
-                }
+                // Both clipboard toggles are downstream of the model: one shows it what you copied,
+                // the other pastes it where the model said it goes. With no model there is nothing
+                // either can do, and the app does not read the clipboard at all — so the switch is
+                // off rather than on and quietly doing nothing.
+                .disabled(!modelIsAvailable)
             }
 
             SettingsSection(
@@ -246,6 +243,14 @@ private struct ModeEditor: View {
                     .filter { !$0.isEmpty }
             }
         )
+    }
+
+    /// Whether the on-device model could run at all. Hardware and OS only, matching the "Model
+    /// instructions" section above — the Configuration switch is named in the prose instead,
+    /// because a control that greys out from another screen reads as broken rather than as a
+    /// dependency.
+    private var modelIsAvailable: Bool {
+        appState.onDeviceRefiner.availability.isAvailable
     }
 
     private func toggle(_ title: String, _ detail: String, _ symbol: String, _ value: Binding<Bool>) -> some View {

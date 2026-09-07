@@ -63,7 +63,7 @@ struct DictationSettings: Codable, Equatable, Sendable {
     ///
     /// On by default, because off is how the app loses what you just said: the ⌘V arrives at an
     /// app with no caret, and `TextInjector.clipboardRestoreDelay` later the clipboard you had
-    /// before comes back over the top of it. See `TextInjector.focusedElementAcceptsText`.
+    /// before comes back over the top of it. See `TextInjector.acceptance`.
     var keepOnClipboardWhenNothingFocused: Bool = true
 }
 

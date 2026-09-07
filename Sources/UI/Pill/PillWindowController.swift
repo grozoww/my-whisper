@@ -10,23 +10,53 @@ import SwiftUI
 final class PillWindowController {
     private var panel: PillPanel?
     private let model = PillModel()
+
     /// The display the current pill belongs to, fixed for as long as it is up.
-    private var screen: NSScreen?
+    ///
+    /// Stored as the display's id, not as the `NSScreen`. AppKit replaces every `NSScreen` object
+    /// when a display is added, removed, woken or re-resolutioned, and a retained one goes on
+    /// reporting the geometry of a screen that is no longer there — so the next re-fit puts the
+    /// pill at coordinates nothing can draw at, and it is simply not on screen any more.
+    private var displayID: CGDirectDisplayID?
+
+    private var screenObserver: NSObjectProtocol?
 
     var pillModel: PillModel { model }
 
     /// What `screencapture -l` needs to photograph just the pill. See `ScreenshotMode`.
     var windowNumber: Int? { panel?.windowNumber }
 
-    func show() {
+    init() {
+        // A display arriving, leaving, waking or changing resolution moves every other display's
+        // origin as well. Without this the pill stays parked at the coordinates it was given, which
+        // may now be behind a bezel or on nothing at all. Registered here rather than off the first
+        // `show()`, so it does not depend on whether anyone has dictated yet; there is no teardown
+        // because this controller lives for the life of the process, and a `deinit` reaching back
+        // into main-actor state is a Swift 6 warning for the sake of code that never runs.
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, let panel = self.panel, panel.isVisible else { return }
+                self.reposition(panel)
+            }
+        }
+    }
+
+    /// Puts the pill up on the display `processIdentifier` is working on.
+    ///
+    /// The pid is the app the text is about to be pasted into — `TextInjector` has just captured
+    /// it. Nil falls back to the pointer, which is all an error pill raised before there is a
+    /// target has to go on.
+    func show(focusedIn processIdentifier: pid_t? = nil) {
         model.reset()
         let panel = panel ?? makePanel()
         self.panel = panel
         // Chosen once, here, rather than on every re-fit: the pill belongs on the screen the user
-        // started dictating on, and re-reading the pointer would make it hop displays mid-sentence
-        // if they moved the mouse.
-        let mouse = NSEvent.mouseLocation
-        screen = NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+        // started dictating on, and re-reading it would make it hop displays mid-sentence.
+        displayID = Self.identifier(of: Self.screen(showing: processIdentifier))
         reposition(panel)
         // `orderFrontRegardless` rather than `makeKeyAndOrderFront` — the latter would do exactly
         // the thing this window must never do.
@@ -85,7 +115,7 @@ final class PillWindowController {
     /// Bottom-centre of the screen picked in `show()`, so the pill appears where the user is
     /// working rather than always on the main display.
     private func reposition(_ panel: NSPanel) {
-        guard let frame = (screen ?? NSScreen.main)?.visibleFrame else { return }
+        guard let frame = currentScreen()?.visibleFrame else { return }
 
         // `layoutIfNeeded` alone returns the size from before the phase changed; the hosting view
         // has to be invalidated first or the panel keeps the old width.
@@ -102,6 +132,89 @@ final class PillWindowController {
         )
         panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
+
+    /// The pill's display, resolved fresh every time rather than held. See `displayID`.
+    private func currentScreen() -> NSScreen? {
+        if let displayID, let live = NSScreen.screens.first(where: { Self.identifier(of: $0) == displayID }) {
+            return live
+        }
+        // The display it was on has gone. Anywhere visible beats nowhere.
+        return NSScreen.main ?? NSScreen.screens.first
+    }
+
+    private static func identifier(of screen: NSScreen?) -> CGDirectDisplayID? {
+        screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+
+    /// The display the user is actually working on.
+    ///
+    /// This used to be the mouse pointer, and the pointer is the one thing in the system that is
+    /// guaranteed not to track keyboard focus: park the mouse on the laptop screen, type on the
+    /// external one, and the pill appears on a display the user is not looking at — which is
+    /// indistinguishable from the pill not appearing. `NSScreen.main` is no better here, because
+    /// it means "the screen with the key window" and this is an accessory app whose pill refuses
+    /// key status, so it answers with the menu bar screen no matter where the user is.
+    ///
+    /// The app already knows which process it is about to paste into, so the honest answer is that
+    /// process's frontmost window. Failing that — a process with no on-screen window, or no target
+    /// at all — the pointer is still the best guess available.
+    private static func screen(showing processIdentifier: pid_t?) -> NSScreen? {
+        guard let processIdentifier, let window = frontmostWindowFrame(of: processIdentifier) else {
+            return screenUnderPointer()
+        }
+
+        // Largest overlap rather than `contains`: a window straddling two displays belongs to the
+        // one showing most of it, which is the one the user is looking at.
+        let best = NSScreen.screens.max {
+            $0.frame.intersection(window).area < $1.frame.intersection(window).area
+        }
+        guard let best, best.frame.intersects(window) else { return screenUnderPointer() }
+        return best
+    }
+
+    /// The frontmost on-screen window belonging to a process, in AppKit coordinates.
+    ///
+    /// The window list rather than Accessibility, because this runs on the way into recording —
+    /// inside the event tap callback — and an AX round trip into another app blocks for as long as
+    /// that app takes to answer, which is exactly the work that makes macOS switch the tap off.
+    /// `CGWindowListCopyWindowInfo` is a window-server query that returns bounds and owner without
+    /// entering the other process, and it needs no permission the app does not already have.
+    private static func frontmostWindowFrame(of processIdentifier: pid_t) -> NSRect? {
+        let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+        guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+            return nil
+        }
+
+        // Front to back, so the first window this process owns is the one in front. Layer 0 is an
+        // ordinary window; anything above it is a panel, a menu or a status item.
+        for window in windows {
+            guard window[kCGWindowOwnerPID as String] as? pid_t == processIdentifier,
+                  window[kCGWindowLayer as String] as? Int == 0,
+                  let bounds = window[kCGWindowBounds as String] as? [String: Any],
+                  let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary)
+            else { continue }
+            return flippedToAppKit(rect)
+        }
+        return nil
+    }
+
+    /// The window list measures down from the top of the primary display; AppKit measures up from
+    /// its bottom. Comparing the two without this puts a window on the wrong screen whenever the
+    /// displays are not stacked the way the naive reading assumes.
+    private static func flippedToAppKit(_ rect: CGRect) -> NSRect {
+        guard let primary = NSScreen.screens.first else { return rect }
+        return NSRect(x: rect.minX, y: primary.frame.maxY - rect.maxY, width: rect.width, height: rect.height)
+    }
+
+    private static func screenUnderPointer() -> NSScreen? {
+        let mouse = NSEvent.mouseLocation
+        return NSScreen.screens.first { $0.frame.contains(mouse) } ?? NSScreen.main
+    }
+}
+
+private extension NSRect {
+    /// Zero for `CGRect.null`, which is what a miss from `intersection` is.
+    var area: CGFloat { isNull ? 0 : width * height }
 }
 
 /// A borderless panel refuses key status by default only when it is not `nonactivating`; being

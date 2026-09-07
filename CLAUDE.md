@@ -121,56 +121,108 @@ fast and do not add work to them.
 **The clipboard has to be read before the paste, not after.** `TextInjector` pastes through the
 clipboard, so by the time cleanup runs the user's clipboard is already the dictated text.
 `DictationController.beginRecording` reads it alongside the paste target, for the same reason, and
-it only reads it at all when some mode has "Use the clipboard as context" or "Paste the clipboard
-after the text" on — `ModeStore.anyModeReadsClipboard` is that condition, and it is what lets the
-README say the clipboard is otherwise only touched to paste. `ClipboardContext` is the single
+it only reads it at all when the on-device model can run *and* some mode has "Use the clipboard as
+context" or "Paste the clipboard where you ask for it" on — `RefinementPipeline.modelIsEnabled`
+and `ModeStore.anyModeReadsClipboard` are those two conditions, and together they are what lets
+the README say the clipboard is otherwise only touched to paste. `ClipboardContext` is the single
 place that reads it, and it refuses anything marked `org.nspasteboard.ConcealedType`, which is
 what a password manager sets on a copied password.
 
 **The two clipboard toggles are opposite treatments of the same text.** Context shows it to the
 on-device model, capped at `ClipboardContext.referenceLimit`, with a prompt forbidding the model
 from repeating any of it. Paste never shows the model anything and reproduces the clipboard
-verbatim after the dictated text — uncapped, because a copied stack trace the app quietly
-shortened would be worse than not pasting it. Keep the capping on `ClipboardContext.reference`,
-not on the read: the read result is what gets pasted. History records what was dictated, not the
-combined paste, so a thirty-day history file never accumulates copies of the user's clipboard.
+verbatim at the marker — uncapped, because a copied stack trace the app quietly shortened would be
+worse than not pasting it. Keep the capping on `ClipboardContext.reference`, not on the read: the
+read result is what gets pasted. History records what was dictated, not the combined paste, so a
+thirty-day history file never accumulates copies of the user's clipboard.
 
-**The clipboard placeholder is substituted last, and that ordering is the whole design.**
+**Where the clipboard lands is the model's decision, and there is no rule behind it.** The
+placeholder is *spoken*, so it never arrives as any phrase written down in advance: the recogniser
+declines it, splits the compound, or the model rewords it. Every rule written to catch that either
+missed the sentence or cut open a sentence that was only *about* the clipboard — "буфер обмена не
+работает" is a complaint, not a request, and in Russian and Ukrainian the ordinary noun for
+clipboard is already two words, so "more than one word" is not a test that separates them. A
+user-editable phrase had the same fault with the user holding the blame. Both are gone.
+
+What is left is the shape that works: the model is asked, in `OnDeviceRefiner.prompt`, to put
+`ClipboardContext.marker` where the user asked for the clipboard — the judgement is the model's,
+which is the part it is good at, and the output is a literal, which is the part a rule is good at.
+Ask for a character offset instead and you get a number a small model guessed at, four out,
+splitting a word.
+
+**The clipboard is substituted for the marker last, and that ordering is the whole design.**
 `ClipboardContext.substituted` runs after rules *and* after the model, because the one thing the
 model must never see is the text it is about to reproduce — it rewords a stack trace, and
-`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×.
-
-**The model marks the spot; the rule fills it.** The placeholder is *spoken*, so it never arrives
-as the phrase the mode has on file: the recogniser writes "clipboard contents", the case ending
-changes in Russian, and the model rewords what is left. Matching it as text was always going to
-miss. So the model is asked, in `OnDeviceRefiner.prompt`, to put `ClipboardContext.marker` where
-the user asked for the clipboard — the judgement is the model's, the output is a literal, and the
-clipboard itself is still never shown. Ask for a character offset instead and you get a number a
-small model guessed at, four out, splitting a word.
+`OnDeviceRefiner.sanityChecked` then throws the answer away for growing past 1.6×. It is a plain
+string replacement, so nothing in the clipboard is read as regex syntax.
 
 Three things hold that together. It is only *asked for* when `ClipboardContext.mentioned` says the
 transcript names the clipboard at all — the model decides where, never whether, or a sentence that
-never mentioned it gets the clipboard dropped into the middle of it. When no marker comes back —
-model off, mode with no instructions, model ignored the request — the spoken phrase is matched
-with `RuleRefiner.cachedInflectedRegex(for:)`, which allows each word three letters of ending, and
-a hand-rolled `\b` here would fire inside Cyrillic. And a marker with no clipboard behind it is
-taken back out by `removingMarker`, punctuation and all, rather than pasted as `[[CLIPBOARD]]`.
+never mentioned it gets the clipboard dropped into the middle of it. `mentioned` is a list of
+stems, matched as substrings across every language the app is used in, and loose on purpose: it
+only decides whether to ask, and the prompt tells the model to write nothing when the sentence was
+only *about* the clipboard. When no marker comes back — the model declined, timed out, or failed
+its sanity check — **nothing is pasted**. There used to be a fallback that put the clipboard after
+the text in that case, and it fired on every dictation the model was not asked or did not answer,
+so a mode with the switch on stapled whatever was copied onto sentences that never mentioned it.
+The marker is the only thing that knows where the clipboard goes; no answer beats the wrong place,
+and it is what lets the switch stay on. And a marker with no clipboard behind it is taken back out
+by `removingMarker`,
+punctuation and all, rather than pasted as `[[CLIPBOARD]]` — including on the way into History,
+which records the sentence rather than the token. What the user actually said is still on the
+entry, in `rawText`.
 
-Escape the clipboard with `NSRegularExpression.escapedTemplate(for:)` on the regex path, or a
-copied `$1` becomes a capture reference. The marker path is a plain string replacement and needs
-no escaping — which is one more reason to prefer it.
+**No model, no clipboard, and that includes not reading it.** Both clipboard toggles are downstream
+of the model — one shows it what you copied, the other pastes it where the model marked — so
+neither can do anything without it. `RefinementPipeline.modelIsEnabled` gates the *read* in
+`beginRecording`, and `willUseModel` gates the paste, which also catches a mode with no
+instructions (Raw is the shipped example). The alternative, appending the clipboard to every
+sentence whenever the model was not there, is not the feature the toggle describes and made "the
+clipboard sometimes ends up in my text" a thing that could happen. Both switches are disabled in
+`ModesView` when the model is unavailable, so a switch is never on and quietly doing nothing.
 
-**"Is there a text field here?" can only be answered in one direction.** A frontmost app with no
-caret swallows the synthetic ⌘V without a word, and the restore 220 ms later puts the user's old
-clipboard back over the text — which is how a dictation into a Finder window used to disappear
-behind a green tick and the word "Finder". `TextInjector.focusedElementAcceptsText` asks the
-focused Accessibility element whether `kAXSelectedText` is settable, and that answer is acted on
-only when it is *no*: the paste is still posted, and all that changes is that the clipboard is not
-restored. Gating the ⌘V on a *yes* would break dictation everywhere it matters most — Chromium and
-Electron expose one `AXWebArea` for a whole page rather than an element per input, which is also
-why `AXWebArea` is in `textRoles`. The check runs at inject time and not in `captureTarget`,
-because that runs inside the event tap callback and a round trip to another process there is
-exactly what makes macOS switch the tap off.
+There is no end-of-text fallback left anywhere, so `ClipboardContext.appended` is gone with it. A
+timeout and a model that was never there now behave the same way — nothing is pasted — which is
+one rule rather than two, and the one the toggle's own description promises.
+
+**"Is there a text field here?" has three answers, and only one of them is worth a clipboard.**
+A frontmost app with no caret swallows the synthetic ⌘V without a word, and the restore 220 ms
+later puts the user's old clipboard back over the text — which is how a dictation into a Finder
+window used to disappear behind a green tick and the word "Finder". Skipping that restore is the
+fix, and it costs the user whatever they had copied, so it is spent only on a definite *no*.
+
+`TextInjector.acceptance` is that decision, and it is pure so it can be tested. It used to be a
+`Bool`, and every Accessibility call that *failed* came back as the same `false` as an empty
+desktop — so a busy Chrome, an Electron app still building its accessibility tree, or an element
+rebuilt during a five-second transcription all looked exactly like "there is nothing here", and
+the app ate the clipboard while the paste visibly worked. `kAXErrorNoValue` is the app answering;
+everything else is the app not answering, and not answering must restore. A role that came back is
+evidence either way; a role that did not is not evidence at all.
+
+The element is read at inject time, not at capture time, and the pid is checked against the
+target. Reading it in `captureTarget` was wrong twice over: that runs inside the event tap
+callback, where a round trip to another process is exactly what makes macOS switch the tap off,
+and a handle taken before transcription is stale by the time it is asked — Chromium and Electron
+rebuild their nodes constantly and a dead handle answers `kAXErrorInvalidUIElement` to everything.
+The pid check exists because `activate()` is asynchronous: another app's text field is not
+evidence about this one. But a foreign pid is not automatically a foreign app — macOS vends the
+focused element from `com.apple.appkit.xpc.openAndSavePanelService` for an Open panel and from
+`com.apple.WebKit.WebContent` for web content, and those have no app of their own. `belongs(owner:
+to:ownerPolicy:)` tells them apart by activation policy: measured on macOS 26 those services are
+`.prohibited` and `.accessory` while every real app is `.regular`. Treating a panel as "some other
+app" demotes its real refusal to `.unknown`, and the restore then wipes out a dictation the panel
+swallowed. A `false` must still never *stop* the ⌘V — browsers hand out one `AXWebArea` for a
+whole page rather than an element per input, which is also why `AXWebArea` is in `textRoles`.
+
+**A transcript left on the clipboard is not something the user copied.** One `.clipboardOnly`
+outcome used to be permanent: the dictated text stayed on the pasteboard, and every dictation
+after it snapshotted that text as "the user's clipboard" and faithfully restored it, so a single
+mis-detection turned into "my clipboard is always the last thing I dictated". `holdsOwnTranscript`
+compares `NSPasteboard.changeCount` against the one the app produced when it wrote — a number, not
+a copy of the text, because keeping the text would mean holding whatever was last dictated
+(possibly a password read aloud) for the life of the process. When it is true the app neither
+restores over it nor reads it back as clipboard context, and the moment the user copies anything
+the answer goes back to false on its own.
 
 **The pill must never take keyboard focus.** It is a `nonactivatingPanel` with
 `canBecomeKey == false`. If it took focus there would be nothing left to paste into.
@@ -234,6 +286,33 @@ nothing, which turned "Symbol" into one letter per line in a narrow mode editor.
 in `SettingsRowLayout` and drops the control onto its own line instead. The window's `minWidth` is the
 other half of that: it is set to what the widest screen actually needs, and lowering it puts the
 squeeze back.
+
+**The mouse pointer does not know where the keyboard focus is.** The pill used to pick its
+display from `NSEvent.mouseLocation`, so parking the pointer on the laptop screen and typing on
+the external one put the pill on a display the user was not looking at — which is
+indistinguishable from the pill not appearing at all, and is what "the bubble does not show on my
+second screen" actually was. `NSScreen.main` is not the fallback it looks like either: it means
+"the screen with the key window", and this is an accessory app whose pill refuses key status, so
+it answers with the menu bar screen wherever the user is. `PillWindowController.screen(showing:)`
+asks the process the text is about to be pasted into instead, via `CGWindowListCopyWindowInfo` —
+a window-server query that returns bounds and owner without entering the other process, because
+this runs inside the event tap callback and an Accessibility round trip there blocks for as long
+as the other app takes to answer. Largest overlap, not `contains`: a window straddling two
+displays belongs to the one showing most of it. `kCGWindowBounds` measures down from the top of
+the primary display and AppKit measures up from its bottom, so `flippedToAppKit` is load-bearing.
+Spaces are a separate thing and already handled — `.canJoinAllSpaces` at `.statusBar` level is
+what puts the pill above another app's full-screen window.
+
+**An `NSScreen` is not a durable name for a display.** AppKit replaces every `NSScreen` object
+when a display is added, removed, woken or re-resolutioned, and a retained one goes on reporting
+geometry for a screen that is no longer there — so the next `setPhase` re-fit parks the pill at
+coordinates nothing can draw at, for the rest of the dictation. `PillWindowController` stores the
+`CGDirectDisplayID` and resolves it to a live `NSScreen` on every `reposition`, and observes
+`NSApplication.didChangeScreenParametersNotification` because a display arriving or leaving moves
+every other display's origin too. Register that observer in `init`, not off the first `show()`,
+and follow `PermissionsManager`'s shape — a block observer on `.main` wrapped in
+`MainActor.assumeIsolated`, with no `deinit`, which on a controller that lives for the process
+would only be a Swift 6 warning for code that never runs.
 
 **A window sized to its content view does not resize when the content does.** The pill's phases
 are different widths — "Cleaning up" is wider than five audio bars — so setting `PillModel.phase`

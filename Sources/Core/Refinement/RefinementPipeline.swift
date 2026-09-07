@@ -41,15 +41,13 @@ final class RefinementPipeline {
         let rules = RuleRefiner(options: mode.cleanup, vocabulary: vocabulary, language: language)
         let cleaned = rules.refine(raw)
 
-        guard settings.useOnDeviceModel, onDevice.availability.isAvailable, !mode.instructions.isEmpty else {
-            return Result(text: cleaned, usedModel: false)
-        }
+        guard willUseModel(settings, mode: mode) else { return Result(text: cleaned, usedModel: false) }
 
         let refined = await onDevice.refine(
             cleaned,
             instructions: mode.instructions,
             context: mode.usesClipboardContext ? clipboard.map(ClipboardContext.reference) : nil,
-            clipboardPlaceholder: placeholderToPlace(mode: mode, clipboard: clipboard, spoken: cleaned),
+            placeClipboard: Self.shouldPlaceClipboard(mode: mode, clipboard: clipboard, spoken: cleaned),
             timeout: .seconds(max(1, settings.modelTimeoutSeconds))
         )
 
@@ -70,19 +68,31 @@ final class RefinementPipeline {
         return Result(text: final, usedModel: true)
     }
 
-    /// The placeholder to ask the model to mark, or nil to not ask at all.
+    /// Whether the on-device model can run at all: switched on, and available on this Mac.
     ///
-    /// Every condition here has to hold before the request goes in the prompt, and the last one is
-    /// the important one: the model is asked *where* the clipboard goes, never *whether* it was
-    /// asked for. Without that check a model that decided the sentence would read better with
-    /// something dropped into it would drop the clipboard mid-thought, and the end of the text —
-    /// where it lands with no placeholder at all — is the safer place to be wrong.
-    private func placeholderToPlace(mode: Mode, clipboard: String?, spoken: String) -> String? {
-        guard mode.pastesClipboard, let clipboard, !clipboard.isEmpty else { return nil }
+    /// Both clipboard features are downstream of this. Context is shown to the model, and the
+    /// paste only ever lands where the model marked — so with the model off there is nothing
+    /// either of them could do, and `DictationController` does not read the clipboard at all
+    /// rather than reading it and finding no use for it.
+    func modelIsEnabled(_ settings: RefinementSettings) -> Bool {
+        settings.isEnabled && settings.useOnDeviceModel && onDevice.availability.isAvailable
+    }
 
-        let placeholder = mode.clipboardPlaceholder.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ClipboardContext.mentioned(placeholder, in: spoken) else { return nil }
-        return placeholder
+    /// The same question for one dictation. A mode with no instructions skips the model — Raw is
+    /// the shipped example — and skips the clipboard with it.
+    func willUseModel(_ settings: RefinementSettings, mode: Mode) -> Bool {
+        modelIsEnabled(settings) && !mode.instructions.isEmpty
+    }
+
+    /// Whether to ask the model where the clipboard goes.
+    ///
+    /// The model is asked *where*, never *whether* it was asked for. Without the last condition a
+    /// model that decided the sentence would read better with something dropped into it would drop
+    /// the clipboard mid-thought, and the end of the text — where it lands when nobody asked for a
+    /// position — is the safer place to be wrong.
+    static func shouldPlaceClipboard(mode: Mode, clipboard: String?, spoken: String) -> Bool {
+        guard mode.pastesClipboard, let clipboard, !clipboard.isEmpty else { return false }
+        return ClipboardContext.mentioned(in: spoken)
     }
 }
 

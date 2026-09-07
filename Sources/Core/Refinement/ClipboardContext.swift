@@ -7,10 +7,11 @@ import AppKit
 /// password manager marked concealed is never read at all. Clipboards hold passwords, keys and
 /// other people's private messages — the feature is worth having only if that one never slips.
 ///
-/// The two shapes are deliberately different. `reference` goes to the on-device model, capped,
-/// and never comes back out. `appended` goes into the paste verbatim, because a stack trace or a
-/// block of code that has been shortened or reworded is worse than useless — but it goes only
-/// into the field the user was already about to paste into, and nowhere else.
+/// The two shapes are deliberately different. `reference` goes to the on-device model, capped, and
+/// never comes back out. `substituted` goes into the paste verbatim, because a stack trace or a
+/// block of code that has been shortened or reworded is worse than useless — but it goes only into
+/// the field the user was already about to paste into, only where the model said it goes, and
+/// nowhere else at all.
 enum ClipboardContext {
     /// Enough for an email, a stack trace or a page of notes; short enough that the model still
     /// answers inside its timeout. A copied document would blow both. This caps what the *model*
@@ -23,6 +24,29 @@ enum ClipboardContext {
     /// that reads like words gets tidied into different words. Brackets and capitals are the shape
     /// a small model copies most reliably, and no dictated sentence contains them by accident.
     static let marker = "[[CLIPBOARD]]"
+
+    /// Words that mean the transcript is talking about the clipboard at all.
+    ///
+    /// This is the only gate, and it decides one thing: whether the model is *asked* where the
+    /// clipboard goes. Loose on purpose, and safe to be — the model still judges, and its prompt
+    /// can still decline. What is not safe is a rule deciding where to cut: the placeholder is
+    /// *spoken*, so it arrives reworded, declined, reordered or split by the recogniser, and every
+    /// phrase list written to catch that either missed the sentence or cut open a sentence that
+    /// only mentioned the clipboard. Judging that is the model's job and nothing else's.
+    ///
+    /// Stems rather than whole words, matched as substrings, because "буфера", "clipboard's" and
+    /// "Zwischenablage" all have to count.
+    private static let stems = [
+        "clipboard",
+        "clip board",
+        "буфер",
+        "portapapeles",
+        "zwischenablage",
+        "presse-papier",
+        "schowek",
+        "剪贴板",
+        "クリップボード",
+    ]
 
     /// Types that mean "this was not meant to be kept". `ConcealedType` is what 1Password and the
     /// other managers set on a copied password; the rest are the same convention for clipboard
@@ -58,65 +82,41 @@ enum ClipboardContext {
         return String(text.prefix(referenceLimit)) + "…"
     }
 
-    /// The clipboard as it is pasted: after the dictated text, separated by a blank line, exactly
-    /// as it was copied.
+    /// The clipboard put where the model said it goes.
     ///
-    /// Uncapped and untouched on purpose. The user copied this to paste it; a version the app
-    /// trimmed to fit a model's context window would be a silently corrupted paste, and pressing
-    /// ⌘V themselves would have given them the whole thing.
-    static func appended(_ clipboard: String?, to text: String) -> String {
-        guard let clipboard, !clipboard.isEmpty else { return text }
-        guard !text.isEmpty else { return clipboard }
-        return text + "\n\n" + clipboard
-    }
-
-    /// The clipboard put where the user said it goes.
+    /// Saying so — "here is the error, paste what I copied, what does it mean?" — is how you wrap
+    /// what you copied in a sentence instead of leaving it dangling at the end. The model is asked
+    /// to leave `marker` at that spot, so by the time this runs the position is a literal and
+    /// there is nothing left to judge: the model did the judging, which is the part it is good at,
+    /// and handed back a token, which is the part a rule is good at.
     ///
-    /// Saying the placeholder — "clipboard content" unless the mode says otherwise — is how you
-    /// wrap what you copied in a sentence instead of leaving it dangling at the end: *"here is the
-    /// error I keep getting, clipboard content, what does it mean?"*. Every occurrence is
-    /// replaced, because saying it twice means twice.
+    /// No phrase matching, deliberately. The words are spoken, so they never arrive as any phrase
+    /// written down in advance — the recogniser declines them, splits the compound, or the model
+    /// rewords them — and a rule loose enough to catch that is also loose enough to cut open a
+    /// sentence that was only *about* the clipboard.
     ///
-    /// Two ways of finding the spot, in order. The model is asked to leave `marker` where the user
-    /// asked for the clipboard, so when the marker is there the position is exact and there is
-    /// nothing to match — the model did the judging, which is the part it is good at, and handed
-    /// back a literal, which is the part a rule is good at. That covers the case a rule cannot:
-    /// the placeholder reworded, reordered or absorbed into the sentence around it.
+    /// No marker means nothing is pasted. There used to be a fallback that put the clipboard after
+    /// the text whenever the marker was missing, and it fired on every dictation the model was not
+    /// asked, declined, or failed to answer — so a mode with this switched on quietly stapled
+    /// whatever you had copied onto sentences that never mentioned it. The marker is the only
+    /// thing that knows where the clipboard goes; with no marker there is no answer, and no answer
+    /// is better than the wrong place.
     ///
-    /// Without the marker — the model is off, the mode has no instructions, or it ignored the
-    /// request — the spoken phrase is matched directly, loosely enough to survive the ending it
-    /// picked up on the way through the speech recogniser. Failing that the clipboard goes to the
-    /// end, which is where it would have gone with no placeholder at all.
+    /// Every occurrence is replaced, because saying it twice means twice. Uncapped and untouched:
+    /// the user copied this to paste it, and a version the app trimmed to fit a model's context
+    /// window would be a silently corrupted paste.
     ///
     /// What does *not* change is the ordering: this runs after the whole refinement pipeline, so
     /// the model is never shown the text it is about to reproduce. Showing it gets a stack trace
     /// reworded, and the length check in `OnDeviceRefiner` would then throw the answer away for
     /// growing.
-    static func substituted(_ clipboard: String?, into text: String, placeholder: String) -> String {
+    static func substituted(_ clipboard: String?, into text: String) -> String {
         // No clipboard, so a marker has nothing to stand for and must not reach the document.
         guard let clipboard, !clipboard.isEmpty else { return removingMarker(from: text) }
 
-        if text.range(of: marker, options: .caseInsensitive) != nil {
-            // A plain string replacement, so nothing in the clipboard is read as regex syntax.
-            return text.replacingOccurrences(of: marker, with: clipboard, options: .caseInsensitive)
-        }
-
-        let phrase = placeholder.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !phrase.isEmpty, let regex = RuleRefiner.cachedInflectedRegex(for: phrase) else {
-            return appended(clipboard, to: text)
-        }
-
-        let range = NSRange(text.startIndex..., in: text)
-        guard regex.firstMatch(in: text, range: range) != nil else {
-            return appended(clipboard, to: text)
-        }
-
-        // Escaped: a clipboard holding "$1" or "\\" is text, not a substitution template.
-        return regex.stringByReplacingMatches(
-            in: text,
-            range: range,
-            withTemplate: NSRegularExpression.escapedTemplate(for: clipboard)
-        )
+        // A plain string replacement, so nothing in the clipboard is read as regex syntax — and a
+        // text with no marker in it comes back exactly as it went in.
+        return text.replacingOccurrences(of: marker, with: clipboard, options: .caseInsensitive)
     }
 
     /// True when what the user said plausibly names the clipboard at all.
@@ -126,13 +126,10 @@ enum ClipboardContext {
     /// invented over a sentence that never mentioned the clipboard would drop it mid-thought,
     /// which is worse than the end.
     ///
-    /// Only the first word, and matched as a substring rather than a whole word, because a loose
-    /// net is exactly what is wanted here — "буфера" and "clipboard's" both have to count. The
-    /// precise judgement is the model's job; this only rules out the sentences where there is
+    /// The precise judgement is the model's job; this only rules out the sentences where there is
     /// nothing to judge.
-    static func mentioned(_ placeholder: String, in text: String) -> Bool {
-        guard let head = placeholder.split(whereSeparator: \.isWhitespace).first else { return false }
-        return text.range(of: String(head), options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    static func mentioned(in text: String) -> Bool {
+        stems.contains { text.range(of: $0, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
     }
 
     /// Takes out a marker that has nothing to stand for, and closes the gap it leaves.
