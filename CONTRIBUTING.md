@@ -111,9 +111,10 @@ against real stores and forces a layout pass. A SwiftUI view that crashes on con
 mismatched `Picker` selection type, an index out of range — compiles perfectly and fails the first
 time someone clicks that row. Add new screens to that test.
 
-The event tap, the paste path and CoreAudio device selection are not covered: they need
-permissions and real hardware. That is why the pull request checklist below asks which apps you
-tested pasting into.
+The event tap, the paste path, CoreAudio device selection and the second half of `UpdateInstaller`
+are not covered: they need permissions, real hardware, or a signed build installed over another
+signed build. That is why the pull request checklist below asks which apps you tested pasting into,
+and what you installed over what.
 
 ## Dependencies
 
@@ -366,6 +367,11 @@ automatically, so you never edit `project.pbxproj` and PRs do not conflict in it
 
 For anything touching the recording, transcription or paste path, say in the description which
 apps you tested pasting into — that path breaks in app-specific ways, and no test covers it.
+
+For anything touching `UpdateInstaller` or `BundleSignature`, say that you installed a
+certificate-signed build over a certificate-signed one and that dictation still worked afterwards
+without re-granting Accessibility. That is the only way to find out, and getting it wrong costs
+every user their permission silently.
 
 Before pushing:
 

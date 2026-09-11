@@ -53,6 +53,7 @@ final class AppState {
 
     let permissions = PermissionsManager()
     let updates = UpdateChecker()
+    let installer = UpdateInstaller()
 
     let settings: SettingsStore
     let modes: ModeStore
@@ -109,6 +110,12 @@ final class AppState {
             router: router,
             refinement: RefinementPipeline(onDevice: onDevice)
         )
+
+        // The installer knows how to replace the app but not when doing so would cost the user
+        // something, and it has no way to reach the stores. These are the two questions it asks
+        // before taking the app away.
+        installer.isSafeToRestart = { [weak self] in self?.recordingState == .idle }
+        installer.flushBeforeRestart = { [weak self] in self?.flushToDisk() }
     }
 
     func start() async {
@@ -118,6 +125,12 @@ final class AppState {
         guard !Self.isRunningTests else { return }
         guard !didStart else { return }
         didStart = true
+
+        // Nothing below may run twice over. After an in-app update this process was started by
+        // the copy it replaces, which is still shutting down — `open -n` is the only form that
+        // launches anything at all while an instance is running, so for a moment there are two.
+        // Waiting is what keeps there from being two event taps and two model loads.
+        await UpdateInstaller.waitForPredecessor()
 
         settings.settings.appearance.theme.apply()
         WindowPresenter.setShowsDockIcon(settings.settings.appearance.showInDock)
@@ -145,6 +158,11 @@ final class AppState {
         if settings.settings.updates.checkAutomatically {
             await updates.check(skippedVersion: settings.settings.updates.skippedVersion)
             settings.settings.updates.lastCheck = Date()
+        }
+
+        // Only a human sets this, and only to find out whether the updater works on this Mac.
+        if SelfTest.installsUpdate {
+            await SelfTest.installUpdate(found: updates, with: installer)
         }
     }
 

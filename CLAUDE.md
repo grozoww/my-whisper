@@ -22,8 +22,14 @@ them.
    Nothing in the build, the tests or CI may require a key.
 2. **The app works with zero keys.** Local speech and local cleanup are the default path.
 3. **No telemetry, ever.** The only unattended network request is the GitHub release check, and it
-   sends nothing about the user. See `UpdateChecker` — the test `sendsNothingIdentifying` is what
-   keeps that true.
+   sends nothing about the user. Downloading an update is a second request, and it is only ever
+   made on a button press — nothing about installing is wired to `checkAutomatically`, there is no
+   pre-fetch and no retry timer. Both requests go out through `UpdateChecker.anonymousRequest`,
+   which replaces the `User-Agent` and `Accept-Language` URLSession would otherwise fill in with
+   the app version, the exact macOS build and the user's region. `sendsNothingIdentifying` and
+   `sendsNothingIdentifyingWhenDownloading` are what keep that true, and both assert on the request
+   the code sent rather than one the test built for itself — the first version of the second test
+   passed with both wrappers deleted, which is no test at all.
 4. **Keep the build warning-free.** CI fails on a warning. The Swift 6 concurrency warnings in the
    audio path are real defects; that code runs on the audio thread.
 
@@ -50,6 +56,7 @@ And one that follows from them:
 ./scripts/make-icon.swift        # redraw the app icon and menu bar glyph into Assets.xcassets
 
 OURWHISPER_SECTION=modes open -a OurWhisper   # open the window on a given screen
+OURWHISPER_SELFTEST_UPDATE=1 open /Applications/OurWhisper.app   # install the newest release over this copy
 ```
 
 `--selftest` exists because the interactive path needs Accessibility permission, which a fresh
@@ -87,7 +94,7 @@ Sources/
     Sound/          Feedback sounds, CoreAudio device list
     Storage/        Paths, JSON file store, lenient decoding
     Transcription/  Provider protocol, Parakeet, Soniox, router
-    Update/         Release check
+    Update/         Release check, and installing one over the running app
     Vocabulary/     Substitution list
   Resources/    Assets.xcassets — the app icon and menu bar glyph, drawn by scripts/make-icon.swift
   UI/           One directory per screen, plus DesignSystem
@@ -271,11 +278,87 @@ vocabulary and history of whoever ran the suite. Use `TemporaryDirectory` from `
 `AppDirectories.support` also redirects to a temporary directory under XCTest as a backstop —
 that backstop exists because this mistake was made once and silently rewrote real user data.
 
-**Accessibility is granted per app bundle at a path.** A second clone or a git worktree produces a
-second `OurWhisper.app` in a different DerivedData directory, and a permission granted to one does
-not apply to the other — while System Settings still shows a ticked OurWhisper. This presents as
-"I granted it and the app still says I did not". The Home screen shows the running bundle path and
-warns when other builds exist; check that before suspecting the permission code.
+**Accessibility is granted per code signature, which for an ad-hoc build means per path.** A second
+clone or a git worktree produces a second `OurWhisper.app` in a different DerivedData directory,
+and a permission granted to one does not apply to the other — while System Settings still shows a
+ticked OurWhisper. This presents as "I granted it and the app still says I did not". The Home
+screen shows the running bundle path and warns when other builds exist; check that before
+suspecting the permission code.
+
+The "at a path" half is only true of an ad-hoc signature, whose designated requirement is a
+`cdhash` — one exact binary, so every rebuild is a different app. Signed with a certificate, the
+requirement is `identifier "com.grozoww.ourwhisper" and certificate leaf = H"…"` and the grant
+follows the bundle identifier and the certificate *anywhere on disk*. That was measured: a bundle
+with the right identifier and the right certificate, at an unrelated path, comes back trusted; the
+same identifier with a different certificate does not. It is also the reason the in-app updater can
+exist at all.
+
+**The designated requirement is the entire security boundary of the in-app update, and it has to be
+read before anything is written.** `SHA256SUMS` ships from the same GitHub release as the disk
+image, so it catches a truncated download and nothing else. Gatekeeper never gets a look: a
+`URLSession` download carries no quarantine flag, only `com.apple.provenance`, so there is no
+assessment to fail. What is left is `BundleSignature`: read the *running* app's designated
+requirement, then `SecStaticCodeCheckValidity` the incoming bundle against it. That single call
+answers both questions at once — the release key was involved, and the Accessibility grant will
+survive — which is why there is one check rather than two.
+
+Three ways to get it wrong, all of which pass:
+
+- **Reading the requirement after the swap.** `SecCodeCopySelf` resolves through the bundle's path,
+  and after the swap that path holds the new app, so the check compares the incoming build against
+  itself and cannot fail. `perform` reads it in its first statement for that reason.
+- **Comparing the candidate's own designated requirement to the running one as strings.** A
+  self-signed certificate's requirement is generated from whichever key signed it, and a bundle
+  with a byte appended to `AppIcon.icns` reports a requirement identical to the genuine one. Only
+  `SecStaticCodeCheckValidity` rejects either.
+- **`kSecCSDoNotValidateResources`, or the `kSecCSBasicValidateOnly` that implies it.** It returns
+  success on a bundle whose sealed resources were swapped, and saves about a millisecond.
+
+An ad-hoc-signed build cannot self-update at all — nothing can satisfy a `cdhash` — so
+`namesACertificate` refuses up front and points at `scripts/install.sh`, rather than installing and
+letting dictation stop with no error.
+
+**`open` on a bundle whose app is already running launches nothing, and exits 0 while doing it.**
+LaunchServices matches the running instance by bundle identifier and merely activates it. Measured
+three times out of three: the successor never started, the guard "did the spawn succeed" never
+fired because the spawn reported success, and terminating left the Mac with no OurWhisper running
+at all — which for a menu bar app is indistinguishable from a crash. `UpdateInstaller.relaunch`
+uses `open -n`, and launches *before* terminating. `scripts/install.sh` gets away with plain `open`
+only because it force-quits the app before installing; an app cannot do that to itself and still be
+around to call `open`.
+
+`-n` then means two instances exist for a moment, and `AppState.start()` installs a system-wide
+event tap and loads a 600 MB model. The new copy is handed `--awaiting-pid <pid>` and
+`waitForPredecessor` blocks on it — ten seconds, then on regardless, because a successor that
+refuses to start because the old copy is wedged is worse than two event taps for an instant.
+
+**The app is replaced by one filesystem operation, never by `rm -rf` and a copy.** `install.sh`
+deletes the old bundle and `ditto`s the new one into place, which is right when a human is watching
+a terminal and would leave an in-app update with no app at all if it were interrupted. Everything
+is downloaded, checksummed, expanded and verified *beside* the installed app in an
+`.itemReplacementDirectory` — which is on the destination's own volume, so the swap is a rename —
+and `replaceItemAt` is the only thing that touches the app. The running process is unharmed: its
+pages stay mapped to the old inode, which lives on unlinked until it exits. Copying over the bundle
+in place instead reuses the inode and macOS kills the process on the next page-in, and `ditto`
+straight onto the live bundle merges rather than replaces, leaving files the new signature does not
+seal — the same silent failure that kills the Accessibility grant.
+
+**A volume mounted under `TemporaryItems` cannot be read by the app, and a shell test will not
+tell you.** The first real run of the updater failed at its first `ls` of the mounted image with
+"you don't have permission to view it". The mount point was inside the `.itemReplacementDirectory`
+staging area — `$TMPDIR/TemporaryItems/NSIRD_OurWhisper_…/mount` — and macOS's System Policy
+treats any volume mounted under `TemporaryItems`, inside the `NSIRD_` directory or beside it, as
+needing Full Disk Access, which never prompts and simply refuses. Measured from a
+LaunchServices-launched app on macOS 26: the same image reads fine at `/Volumes`, `/tmp`, `$TMPDIR`
+itself or `~/Library/Caches`. `UpdateInstaller.expand` mounts under `$TMPDIR` with a unique name
+for that reason; the staging directory still holds the download and the expanded copy, because
+those are ordinary files and the swap needs them on the destination's volume.
+
+Three rounds of research and a shell reproduction all said the original layout worked, because
+every probe ran from Terminal, which carries Full Disk Access the app does not have. **A test of
+anything TCC-shaped has to run inside a real `.app` launched through LaunchServices** — that is
+what `OURWHISPER_SELFTEST_UPDATE=1` is for, and what the throwaway `MountProbe.app` that found
+this did.
 
 **Padding a `Section` pads every row in it.** In a `List`, `Section { rows }.padding(.top, 10)`
 does not put 10pt above the group — it puts 10pt above each row inside it, so the rows come out
@@ -500,7 +583,7 @@ anything depending on `mlx-swift` 0.31.5+ needs Xcode's separately-downloaded Me
 
 ## Testing
 
-Swift Testing, not XCTest. 157 tests, no network, no API key, no microphone, no permissions.
+Swift Testing, not XCTest. 197 tests, no network, no API key, no microphone, no permissions.
 
 - Cloud providers are tested against `StubHTTPClient` with recorded response shapes.
 - Every screen is built and laid out in `ViewRenderingTests` — a view that crashes on
@@ -508,8 +591,24 @@ Swift Testing, not XCTest. 157 tests, no network, no API key, no microphone, no 
 - The rule refiner has the deepest coverage because it is pure and it touches every dictation.
 
 What is *not* covered, and why: the event tap, the paste path and CoreAudio device selection all
-need permissions and real hardware. For those, `CONTRIBUTING.md` asks which apps you tested pasting
-into, and that stays a human answer.
+need permissions and real hardware. The second half of `UpdateInstaller` joins them —
+`hdiutil attach`, `ditto`, `replaceItemAt`, `open -n` and a real `SecStaticCodeCheckValidity`
+against the release certificate cannot run in CI, and the question they answer ("did the
+Accessibility grant survive?") has no API. Everything up to the swap is covered: `fetch` runs
+against `StubHTTPClient`, and the decisions — the checksum, the requirement's shape, whether the
+bundle can be replaced — are pure. For the rest there is one command, and it is the only honest
+test of the updater on a Mac:
+
+```bash
+OURWHISPER_SELFTEST_UPDATE=1 open /Applications/OurWhisper.app   # then ./scripts/run.sh --logs
+```
+
+It needs a build signed with the release certificate that reports a version *older* than the
+newest release — `xcodebuild … MARKETING_VERSION=1.0.0` then `codesign` with the same flags
+`package.sh` uses — installed at `/Applications`. Success is the process restarting into the new
+version and the successor logging `Hotkey tap armed`, which it can only do if the Accessibility
+grant survived. `CONTRIBUTING.md` asks for exactly that in a pull request, and it stays a human
+answer.
 
 ## Style
 

@@ -26,6 +26,36 @@ enum SelfTest {
         return language
     }
 
+    /// Whether to install whatever the update check finds, with nobody pressing the button.
+    ///
+    /// The half of `UpdateInstaller` the unit tests cannot reach — `hdiutil`, `ditto`, the swap,
+    /// `open -n`, and a real signature check against the release certificate — has exactly one
+    /// way to be exercised on purpose, and this is it. The build has to be signed with the release
+    /// certificate and report a version older than the newest release, or there is nothing it is
+    /// allowed to install:
+    ///
+    ///     OURWHISPER_SELFTEST_UPDATE=1 open /Applications/OurWhisper.app
+    ///
+    /// Then `./scripts/run.sh --logs`. Success ends the process by restarting into the new
+    /// version, so a self-test that is still running has failed, and the `update` category says
+    /// where.
+    static var installsUpdate: Bool {
+        ProcessInfo.processInfo.environment["OURWHISPER_SELFTEST_UPDATE"] == "1"
+    }
+
+    @MainActor
+    static func installUpdate(found checker: UpdateChecker, with installer: UpdateInstaller) async {
+        log.info("Update self-test starting: running \(UpdateChecker.currentVersion, privacy: .public)")
+        guard case .available(let release) = await checker.check(force: true) else {
+            log.error("UPDATE SELFTEST FAILED: nothing newer than \(UpdateChecker.currentVersion, privacy: .public) is published")
+            return
+        }
+        log.info("Installing \(release.version, privacy: .public)")
+        await installer.install(release)
+        // A successful install never gets here: the process has restarted into the new version.
+        log.error("UPDATE SELFTEST FAILED: the app is still running — \(String(describing: installer.phase), privacy: .public)")
+    }
+
     static func run(path: String, language: SpeechLanguage, provider: any TranscriptionProvider) async {
         log.info("Self-test starting: \(path, privacy: .public) [\(language.rawValue, privacy: .public)]")
 
