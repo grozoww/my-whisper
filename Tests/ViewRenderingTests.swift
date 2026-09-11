@@ -56,6 +56,47 @@ struct ViewRenderingTests {
         _ = temp
     }
 
+    @Test("The update controls build in every phase they can be in", arguments: [
+        UpdateInstaller.Phase.idle,
+        .downloading(0.42),
+        .downloading(nil),
+        .verifying,
+        .installing,
+        .restarting,
+        .installedNeedsRestart,
+        .failed("The download does not match its published checksum."),
+    ])
+    func rendersUpdateControls(phase: UpdateInstaller.Phase) {
+        // The banner swaps its controls out per phase — buttons, a bar, a spinner — and a `switch`
+        // in a `ViewBuilder` is exactly the shape that compiles and then crashes on one branch.
+        let (state, temp) = makeState()
+        render(UpdateActions(release: Self.release, phase: phase, refusal: nil).environment(state))
+        // And the same phase dressed as a refusal, which swaps the symbol and the tint.
+        render(UpdateActions(release: Self.release, phase: phase, refusal: "Ad-hoc signed.").environment(state))
+        _ = temp
+    }
+
+    @Test("The update banner builds against a real AppState")
+    func rendersUpdateBanner() {
+        let (state, temp) = makeState()
+        render(UpdateBanner(release: Self.release).environment(state))
+        _ = temp
+    }
+
+    private static let release = UpdateChecker.Release(
+        version: "9.9.9",
+        title: "Nine",
+        notes: "",
+        url: URL(string: "https://github.com/grozoww/my-whisper/releases/tag/v9.9.9")!,
+        publishedAt: nil,
+        dmg: UpdateChecker.Asset(
+            name: "OurWhisper-9.9.9-unnotarized.dmg",
+            url: URL(string: "https://example.invalid/OurWhisper-9.9.9-unnotarized.dmg")!,
+            size: 1
+        ),
+        checksums: URL(string: "https://example.invalid/SHA256SUMS")!
+    )
+
     @Test("Home renders with history present")
     func rendersHomeWithData() {
         let (state, temp) = makeState()

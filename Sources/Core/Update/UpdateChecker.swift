@@ -26,6 +26,22 @@ final class UpdateChecker {
         let notes: String
         let url: URL
         let publishedAt: Date?
+        /// The disk image to install, and the file carrying its checksum.
+        ///
+        /// Both optional, and they have to be: releases from before `SHA256SUMS` existed have no
+        /// checksum, an asset can still be uploading, and a release with neither is still worth
+        /// showing — the banner has release notes to offer whether or not the app can install it.
+        /// `UpdateInstaller` refuses without both rather than guessing at one.
+        let dmg: Asset?
+        let checksums: URL?
+    }
+
+    struct Asset: Equatable, Sendable {
+        let name: String
+        let url: URL
+        /// What GitHub says the file weighs. Checked before the checksum, because comparing two
+        /// numbers is free and hashing 12 MB is not.
+        let size: Int64
     }
 
     /// The list of releases — deliberately *not* `/releases/latest`, and deliberately not read in
@@ -51,6 +67,26 @@ final class UpdateChecker {
         self.http = http
     }
 
+    /// What went wrong reaching GitHub, said the way GitHub failures actually happen.
+    ///
+    /// `HTTPError.from` maps 401 and 403 to "The API key was rejected. Check it in Configuration",
+    /// which is right for a cloud speech provider and wrong here twice over: this request carries
+    /// no key at all, and a 403 from GitHub is its rate limit for unauthenticated callers, which
+    /// clears by itself. Telling someone to check a key they have never had is worse than telling
+    /// them nothing.
+    enum Failure: LocalizedError {
+        case github(Int)
+
+        var errorDescription: String? {
+            switch self {
+            case .github(403), .github(429):
+                "GitHub is rate-limiting update checks from this network. Try again in a few minutes."
+            case .github(let status):
+                "GitHub answered \(status) when asked for the releases list. Try again later."
+            }
+        }
+    }
+
     nonisolated static var currentVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
     }
@@ -68,9 +104,8 @@ final class UpdateChecker {
     func check(skippedVersion: String? = nil, force: Bool = false) async -> State {
         state = .checking
 
-        var request = URLRequest(url: Self.endpoint)
+        var request = Self.anonymousRequest(Self.endpoint)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        request.timeoutInterval = 15
 
         do {
             let (data, response) = try await http.send(request)
@@ -84,7 +119,7 @@ final class UpdateChecker {
             }
 
             guard (200..<300).contains(response.statusCode) else {
-                throw HTTPError.from(status: response.statusCode, body: data)
+                throw Failure.github(response.statusCode)
             }
 
             guard let json = try? JSONSerialization.jsonObject(with: data) else {
@@ -157,12 +192,16 @@ final class UpdateChecker {
             ISO8601DateFormatter().date(from: $0)
         }
 
+        let (dmg, checksums) = assets(in: json)
+
         return Release(
             version: normalise(tag),
             title: (json["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? tag,
             notes: json["body"] as? String ?? "",
             url: url,
-            publishedAt: published
+            publishedAt: published,
+            dmg: dmg,
+            checksums: checksums
         )
     }
 
@@ -206,5 +245,65 @@ final class UpdateChecker {
             .split(whereSeparator: { $0 == "." || $0 == "-" || $0 == "+" })
             .prefix { Int($0) != nil }
             .compactMap { Int($0) }
+    }
+
+    // MARK: - What a release carries
+
+    /// A GET that says nothing about this Mac.
+    ///
+    /// Left alone, `URLSession` fills in two headers of its own: `User-Agent` becomes
+    /// `OurWhisper/1.0.15 CFNetwork/… Darwin/25.6.0` — the app version and the exact macOS build —
+    /// and `Accept-Language` becomes whatever region the user set. Neither can be removed, so both
+    /// are replaced with constants that are identical for every user. The Configuration screen
+    /// promises "nothing about you or this Mac is sent"; this is what makes that true rather than
+    /// nearly true. `sendsNothingIdentifying` and `sendsNothingIdentifyingWhenDownloading` are
+    /// what keep it so, and both assert on the request the code sent rather than on one the test
+    /// built for itself — which is the only version of that test that can fail.
+    nonisolated static func anonymousRequest(_ url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.setValue("OurWhisper", forHTTPHeaderField: "User-Agent")
+        request.setValue("en", forHTTPHeaderField: "Accept-Language")
+        request.timeoutInterval = 15
+        return request
+    }
+
+    /// The DMG and the `SHA256SUMS` beside it, out of a release's `assets` array.
+    ///
+    /// Taken from the same release object as the download rather than searched for separately:
+    /// `scripts/install.sh` used to find the two independently and could pair a disk image with
+    /// another release's checksums, which then matched nothing and skipped the check in silence.
+    ///
+    /// `state` is `uploaded` once GitHub actually has the bytes; anything else has a URL that 404s.
+    /// A missing `state` counts as uploaded, so a hand-made fixture does not have to carry one.
+    nonisolated static func assets(in json: [String: Any]) -> (dmg: Asset?, checksums: URL?) {
+        let uploaded = ((json["assets"] as? [[String: Any]]) ?? [])
+            .filter { ($0["state"] as? String ?? "uploaded") == "uploaded" }
+
+        func url(of asset: [String: Any]) -> URL? {
+            (asset["browser_download_url"] as? String).flatMap(URL.init(string:))
+        }
+
+        // Chosen, not taken. GitHub documents no order for `assets` either, and reading a GitHub
+        // list positionally is the mistake that already cost this project four silent releases —
+        // see `newestFinishedRelease`. `package.sh` gives the image one of three names depending on
+        // how it was signed, and the ranking below is that same order of preference: a notarized
+        // build over an unnotarized one, and never the ad-hoc `-unsigned` build, which cannot
+        // satisfy the running app's designated requirement and would only ever be refused.
+        let dmg = uploaded
+            .compactMap { asset -> Asset? in
+                guard let name = asset["name"] as? String, name.hasSuffix(".dmg"),
+                      !name.hasSuffix("-unsigned.dmg"), let url = url(of: asset)
+                else { return nil }
+                return Asset(name: name, url: url, size: (asset["size"] as? NSNumber)?.int64Value ?? 0)
+            }
+            .min { (rank($0.name), $0.name) < (rank($1.name), $1.name) }
+
+        let checksums = uploaded.first { ($0["name"] as? String) == "SHA256SUMS" }.flatMap(url(of:))
+        return (dmg, checksums)
+    }
+
+    /// Lower is preferred. `package.sh`'s three signing paths, in the order a user wants them.
+    nonisolated private static func rank(_ name: String) -> Int {
+        name.hasSuffix("-unnotarized.dmg") ? 1 : 0
     }
 }

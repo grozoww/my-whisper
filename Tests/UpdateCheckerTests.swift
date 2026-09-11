@@ -261,6 +261,89 @@ struct UpdateCheckerTests {
         #expect(request.httpBody == nil)
         #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
         #expect(request.url?.query == nil)
+        // URLSession fills these two in by itself if they are left alone: a User-Agent carrying
+        // the app version and the exact macOS build, and an Accept-Language carrying the user's
+        // region. They cannot be removed, only replaced with something every user sends.
+        #expect(request.value(forHTTPHeaderField: "User-Agent") == "OurWhisper")
+        #expect(request.value(forHTTPHeaderField: "Accept-Language") == "en")
+    }
+
+    // MARK: - Assets
+
+    private func asset(_ name: String, size: Int = 12_014_558, state: String = "uploaded") -> [String: Any] {
+        [
+            "name": name,
+            "state": state,
+            "size": size,
+            "browser_download_url": "https://github.com/grozoww/my-whisper/releases/download/release-1.0.15-68c910d/\(name)",
+        ]
+    }
+
+    @Test("The disk image and its checksums come off the release that carries them")
+    func findsAssets() throws {
+        // Both taken from the same release object, never searched for separately: install.sh used
+        // to find them independently and could pair an image with another release's checksums,
+        // which then matched nothing and skipped the check without saying so.
+        let found = try #require(UpdateChecker.parse(releaseJSON([
+            "assets": [asset("OurWhisper-1.0.15-unnotarized.dmg"), asset("SHA256SUMS", size: 100)],
+        ])))
+
+        #expect(found.dmg?.name == "OurWhisper-1.0.15-unnotarized.dmg")
+        #expect(found.dmg?.size == 12_014_558)
+        #expect(found.checksums?.lastPathComponent == "SHA256SUMS")
+    }
+
+    @Test("An asset GitHub has not finished receiving is not offered")
+    func ignoresAssetsStillUploading() throws {
+        // Its download URL 404s, so offering it fails a download the user pressed a button for.
+        let found = try #require(UpdateChecker.parse(releaseJSON([
+            "assets": [asset("OurWhisper-1.0.15-unnotarized.dmg", state: "starter"), asset("SHA256SUMS", size: 100)],
+        ])))
+        #expect(found.dmg == nil)
+    }
+
+    @Test("A release with no assets still parses and still offers its notes")
+    func parsesReleaseWithoutAssets() throws {
+        // Releases from before SHA256SUMS existed have none, and a release with nothing to install
+        // is still worth telling the user about — the banner has a link either way.
+        let found = try #require(UpdateChecker.parse(releaseJSON()))
+        #expect(found.dmg == nil)
+        #expect(found.checksums == nil)
+        #expect(found.url.absoluteString.hasSuffix("v0.2.0"))
+    }
+
+    @Test("The disk image is chosen, not taken in the order GitHub listed it")
+    func choosesTheDiskImage() throws {
+        // `package.sh` names the image for the way it was signed, and GitHub documents no order
+        // for `assets` any more than it does for the releases list — the mistake that already cost
+        // this project four silent releases. A notarized build is what a user wants; the ad-hoc
+        // `-unsigned` one can never satisfy the running app's requirement, so offering it would
+        // only ever produce a refusal.
+        let found = try #require(UpdateChecker.parse(releaseJSON([
+            "assets": [
+                asset("OurWhisper-1.0.15-unsigned.dmg"),
+                asset("OurWhisper-1.0.15-unnotarized.dmg"),
+                asset("OurWhisper-1.0.15.dmg"),
+            ],
+        ])))
+        #expect(found.dmg?.name == "OurWhisper-1.0.15.dmg")
+    }
+
+    @Test("An ad-hoc build is never offered, even when it is the only image there")
+    func neverOffersAnUnsignedImage() throws {
+        let found = try #require(UpdateChecker.parse(releaseJSON([
+            "assets": [asset("OurWhisper-1.0.15-unsigned.dmg"), asset("SHA256SUMS", size: 100)],
+        ])))
+        #expect(found.dmg == nil)
+    }
+
+    @Test("Assets that are neither the image nor the checksums are ignored")
+    func ignoresOtherAssets() throws {
+        let found = try #require(UpdateChecker.parse(releaseJSON([
+            "assets": [asset("INSTALL.md", size: 2_000), asset("OurWhisper-1.0.15-unnotarized.dmg")],
+        ])))
+        #expect(found.dmg?.name == "OurWhisper-1.0.15-unnotarized.dmg")
+        #expect(found.checksums == nil)
     }
 
     @Test("A repository with no releases yet is not an error")

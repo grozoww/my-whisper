@@ -344,12 +344,15 @@ private struct StartupSection: View {
 private struct UpdatesSection: View {
     @Environment(AppState.self) private var appState
 
+    /// Read once, not from `body` — see `UpdateActions`.
+    @State private var refusal: String?
+
     var body: some View {
         @Bindable var settings = appState.settings
 
         SettingsSection(
             title: "Updates",
-            subtitle: "The only request the app makes on its own. It is an unauthenticated read of the public releases page — nothing about you or this Mac is sent."
+            subtitle: "The only requests the app makes on its own, and unauthenticated reads of a public page — nothing about you or this Mac is sent. Checking happens by itself if you let it; downloading only ever happens when you press the button."
         ) {
             SettingsRow(
                 symbol: "arrow.down.circle",
@@ -359,21 +362,44 @@ private struct UpdatesSection: View {
                 Toggle("", isOn: $settings.settings.updates.checkAutomatically).toggleStyle(.switch)
             }
             RowDivider()
-            SettingsRow(
-                symbol: "magnifyingglass",
-                title: "Check now",
-                detail: "Version \(UpdateChecker.currentVersion)"
-            ) {
-                Button("Check") {
-                    Task {
-                        await appState.updates.check(force: true)
-                        appState.settings.settings.updates.lastCheck = Date()
-                    }
+            // The same offer as the Home screen's banner, in the place the Check button leads to.
+            // Finding out a release exists and having nothing to press is where this screen used
+            // to end.
+            if case .available(let release) = appState.updates.state {
+                SettingsRow(
+                    symbol: UpdateActions.isWarning(phase: appState.installer.phase, refusal: refusal)
+                        ? "exclamationmark.triangle.fill"
+                        : "arrow.down.circle.fill",
+                    title: "Version \(release.version) is available",
+                    detail: UpdateActions.detail(
+                        phase: appState.installer.phase,
+                        refusal: refusal,
+                        release: release
+                    ),
+                    tint: UpdateActions.isWarning(phase: appState.installer.phase, refusal: refusal)
+                        ? .orange
+                        : .accentColor
+                ) {
+                    UpdateActions(release: release, phase: appState.installer.phase, refusal: refusal)
                 }
-                .buttonStyle(.bordered)
-                .disabled(appState.updates.state == .checking)
+            } else {
+                SettingsRow(
+                    symbol: "magnifyingglass",
+                    title: "Check now",
+                    detail: "Version \(UpdateChecker.currentVersion)"
+                ) {
+                    Button("Check") {
+                        Task {
+                            await appState.updates.check(force: true)
+                            appState.settings.settings.updates.lastCheck = Date()
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(appState.updates.state == .checking)
+                }
             }
         }
+        .task { refusal = appState.installer.refusal }
     }
 
     private var statusDetail: String {

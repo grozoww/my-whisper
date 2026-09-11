@@ -156,33 +156,6 @@ private struct ModeRow: View {
     }
 }
 
-private struct UpdateBanner: View {
-    @Environment(AppState.self) private var appState
-    let release: UpdateChecker.Release
-
-    var body: some View {
-        Card {
-            SettingsRow(
-                symbol: "arrow.down.circle.fill",
-                title: "Version \(release.version) is available",
-                detail: release.title,
-                tint: .accentColor
-            ) {
-                HStack(spacing: 8) {
-                    Button("Skip") {
-                        appState.settings.settings.updates.skippedVersion = release.version
-                        appState.updates.dismissAvailableRelease()
-                    }
-                    .buttonStyle(.bordered)
-
-                    Link("Release notes", destination: release.url)
-                        .buttonStyle(.borderedProminent)
-                }
-            }
-        }
-    }
-}
-
 /// The "I granted it and it still says no" row.
 ///
 /// Two things cause it, and neither is visible in System Settings, which lists an app by name.

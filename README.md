@@ -147,6 +147,13 @@ It is a menu bar app — look for the microphone icon in the menu bar, not the D
 "Show in the Dock" switch in Configuration if you would rather have one, and an "Open at login"
 switch next to it.
 
+**Updating.** When a newer release exists, the Home screen offers **Update and restart**. The app
+downloads that release's disk image, checks it against the published `SHA256SUMS`, and then checks
+that it is signed with the same key as the copy you are running — that last check is the one that
+matters, because it is also exactly the condition under which macOS keeps your Accessibility
+permission. If any of it does not add up, nothing is installed and the row says why. Re-running
+`install.sh` still works and does the same thing.
+
 You grant Accessibility once and it stays granted. macOS attaches that permission to the app's
 code signature, so releases are signed with a certificate that does not change between versions.
 Upgrading from a release older than that change costs you the grant one last time: the entry in
@@ -159,7 +166,10 @@ Building from source is documented in [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Privacy
 
 - Audio and transcripts stay on disk, under your control, with a retention setting.
-- No telemetry. No crash reporting. No network calls unless you enable a cloud provider.
+- No telemetry. No crash reporting. The only requests the app makes on its own go to the public
+  GitHub releases page, and none of them carries anything about you or this Mac: the update check,
+  which you can turn off in Configuration, and — only when you press **Update and restart** — the
+  release's disk image and its checksums. Everything else needs a cloud provider you enabled.
 - API keys you paste are stored in the **macOS Keychain**, never in a config file or a log, and
   are only ever sent to that provider.
 - The clipboard is only read to paste, unless the on-device model is on *and* a mode has "Use the
