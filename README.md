@@ -143,9 +143,9 @@ they were; tags produce versioned releases.
 
 OurWhisper then asks for Microphone and Accessibility permission, and both are required: the
 microphone to hear you, Accessibility to watch for the hotkey and paste into the focused field.
-It is a menu bar app — look for the microphone icon in the menu bar, not the Dock. There is a
-"Show in the Dock" switch in Configuration if you would rather have one, and an "Open at login"
-switch next to it.
+It is a menu bar app — look for the frog in the menu bar, not the Dock. There is a "Show in the
+Dock" switch in Configuration if you would rather have one, and an "Open at login" switch next to
+it.
 
 You grant Accessibility once and it stays granted. macOS attaches that permission to the app's
 code signature, so releases are signed with a certificate that does not change between versions.

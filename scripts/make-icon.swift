@@ -369,24 +369,42 @@ private func drawIcon(in context: CGContext, size: CGFloat) {
 
 // MARK: - Menu bar glyph
 
-/// Everything the glyph puts on the canvas, in 1024 space, including the outer half of every
-/// stroke. The menu bar drawing is fitted to its canvas rather than laid out in it, and a fit
-/// that measured the centre line would clip the outside of the head by half a line.
-extension Face {
-    var bounds: CGRect {
+/// What the menu bar fills in: the head, and the eyes as discs where they rise above it. The
+/// discs are what give the bumps their round tops, so they are part of the shape rather than
+/// something drawn on it.
+///
+/// Coordinates are the 1024 layout's. `bounds` is the box the drawing is fitted by, so it takes
+/// in the whole of the discs, which poke above the head's own top.
+private struct Silhouette {
+    let headStart: CGPoint
+    let head: [Face.Curve]
+    let eyeCentres: [CGPoint]
+    let eyeRadius: CGFloat
+
+    var headPath: CGPath {
         let path = CGMutablePath()
         path.move(to: headStart)
         for c in head { path.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
-        var box = path.boundingBoxOfPath.insetBy(dx: -headLine / 2, dy: -headLine / 2)
-        for centre in eyeCentres {
-            let r = eyeRadius + eyeLine / 2
-            box = box.union(CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
-        }
-        return box
+        path.closeSubpath()
+        return path
+    }
+
+    var eyeRects: [CGRect] {
+        eyeCentres.map { CGRect(x: $0.x - eyeRadius, y: $0.y - eyeRadius, width: eyeRadius * 2, height: eyeRadius * 2) }
+    }
+
+    var bounds: CGRect {
+        eyeRects.reduce(headPath.boundingBoxOfPath) { $0.union($1) }
     }
 }
 
-/// The menu bar mark: the same face, drawn as an outline with nothing filled in.
+/// The menu bar mark: the same face, solid, with the features cut out of it.
+///
+/// That is the reverse of the app icon's ink-on-skin drawing, and deliberately so. Every other
+/// glyph in a menu bar is a filled shape — the bell, the cup, the battery — and an outline frog
+/// beside them read as the one icon that had not been coloured in. It also failed on its own
+/// terms: at 18 pixels a one-pixel ring around a 14-pixel face is mostly grey haze, whereas a
+/// solid head is a solid head, and a two-pixel hole in it is visible from across the room.
 ///
 /// It is a *template* image, which is the whole reason there is one drawing and not two. macOS
 /// keeps only the alpha channel of a template and paints the shape itself — dark on a light menu
@@ -394,86 +412,94 @@ extension Face {
 /// Contrast. A checked-in light PNG and dark PNG would get all four of those wrong, and the first
 /// one worst: the menu bar's appearance follows the desktop picture, not the appearance setting
 /// in System Settings, so a dark wallpaper under Light Mode would take the light artwork and
-/// disappear into the bar.
+/// disappear into the bar. Being alpha-only is also what makes the cut-outs work: a hole is an
+/// alpha of zero, and the bar shows through it whatever colour the bar is.
 ///
-/// The shape is `simplified`'s, so the two marks read as the same animal. The line weights are
-/// not, and cannot be: 34/1024 is a confident stroke at 512 pixels and a third of a pixel at 18,
-/// which the rasteriser renders as grey haze. These land near 1.4 pixels at 18 and 2.8 at 36.
-private let menuBarMouth = Mouth(
-    start: point(206, 620),
-    end: point(830, 620),
-    amplitude: 84,
-    cycles: 2,
-    span: 0.44,
-    onset: 1,
-    decay: 2.3
-)
+/// The head is the shared geometry, fitted to the canvas; the features are laid out *per size, in
+/// pixels*. At these sizes an eye is two or eight pixels across and a mouth is one or two pixels
+/// tall, and which pixels they land on is the difference between a mark and a smudge: a two-pixel
+/// hole centred on a pixel corner takes four pixels nearly whole, and the same hole a quarter of
+/// a pixel over spreads across nine at a third each, which the bar shows as a faint grey blot.
+/// Fitting decides where the head lands, so the pixel positions below are tuned to that fit —
+/// change the head and re-check them against the rendered PNGs.
+private struct Glyph {
+    let silhouette: Silhouette
 
-private let menuBarFace = Face(
+    /// The eye holes, in pixels, y down. `eyeCorner` is how round they are: equal to the radius
+    /// for a circle, and near zero at 18 pixels, where a circle two pixels across would put only
+    /// 78% of each pixel into the hole and read as grey rather than as a hole.
+    let eyeCentres: [CGPoint]
+    let eyeRadius: CGFloat
+    let eyeCorner: CGFloat
+
+    /// A solid dot left in the middle of each eye hole; zero where there is no room for one.
+    let pupilRadius: CGFloat
+
+    /// The mouth, in pixels, cut through the chin as a gap of `mouthLine`.
+    let mouth: Mouth
+    let mouthLine: CGFloat
+}
+
+/// `simplified`'s head, so the two marks read as the same animal, with eye discs to the outside
+/// edge of the app icon's rings.
+private let menuBarSilhouette = Silhouette(
     headStart: simplified.headStart,
     head: simplified.head,
     eyeCentres: simplified.eyeCentres,
-    eyeRadius: 96,
-    pupilCentres: simplified.pupilCentres,
-    pupilRadius: 30,
-    nostrils: [],
-    mouthStart: menuBarMouth.start,
-    mouthCurves: menuBarMouth.curves,
-    headLine: 62,
-    eyeLine: 46,
-    nostrilLine: 0,
-    mouthLine: 52
+    eyeRadius: 119
 )
 
-/// At 18 pixels the whole face is fourteen pixels tall. An eye becomes a four-pixel ring with a
-/// one-pixel hole, which rasterises to a grey blob, and four lobes of mouth land inside four pixels.
-/// So the unscaled menu bar gets solid eyes and a single cycle — the same trade the icon makes
-/// below 32 pixels, one size further down. One cycle rather than none because the envelope still
-/// has to open and close for the wave to fade rather than stop, and at this size the second lobe is
-/// a quarter of the first and shows as little more than the angle the line leaves at.
-private let menuBarSmallMouth = Mouth(
-    start: point(214, 628),
-    end: point(822, 628),
-    amplitude: 88,
-    cycles: 1,
-    span: 0.32,
-    onset: 1,
-    decay: 2.3
+/// 36 pixels, which is 18 points on every Retina display: room for an eye to be a ring with a
+/// pupil in it, and for the mouth to be the same two-cycle wave the icon carries below 32 pixels.
+/// The mouth gap is two pixels — one point — the weight of the lines on the SF Symbols beside it.
+private let menuBarGlyph = Glyph(
+    silhouette: menuBarSilhouette,
+    eyeCentres: [point(10, 9), point(26, 9)],
+    eyeRadius: 4,
+    eyeCorner: 4,
+    pupilRadius: 1.5,
+    mouth: Mouth(start: point(3, 21), end: point(33, 21), amplitude: 4, cycles: 2, span: 0.44, onset: 1, decay: 2.3),
+    mouthLine: 2
 )
 
-private let menuBarSmallFace = Face(
-    headStart: simplified.headStart,
-    head: simplified.head,
-    eyeCentres: simplified.eyeCentres,
-    eyeRadius: 46,
-    pupilCentres: [point(352, 340), point(672, 340)],
-    pupilRadius: 46,
-    nostrils: [],
-    mouthStart: menuBarSmallMouth.start,
-    mouthCurves: menuBarSmallMouth.curves,
-    headLine: 44,
-    eyeLine: 0,
-    nostrilLine: 0,
-    mouthLine: 38
+/// 18 pixels: the whole face is fifteen pixels tall. Each eye is a two-by-two hole set on a pixel
+/// corner, with no pupil, and the mouth is a one-pixel gap with a single cycle of wave at its
+/// left — one rather than none because the envelope still has to open and close for the wave to
+/// fade into the line rather than stop at it, and at this size the second lobe would be a
+/// quarter of the first and show as little more than the angle the line leaves at.
+private let menuBarSmallGlyph = Glyph(
+    silhouette: menuBarSilhouette,
+    eyeCentres: [point(5, 4), point(13, 4)],
+    eyeRadius: 1,
+    eyeCorner: 0.4,
+    pupilRadius: 0,
+    mouth: Mouth(start: point(2.5, 11.5), end: point(15.5, 11.5), amplitude: 1.5, cycles: 1, span: 0.4, onset: 1, decay: 2.3),
+    mouthLine: 1
 )
 
 /// Black on nothing. A template's colour is never used, but the alpha is, so anti-aliased edges
-/// have to come from the shape rather than from a grey fill.
+/// have to come from the shape rather than from a grey fill — and the features are holes in the
+/// alpha, cut with the `.clear` blend mode, not lighter ink.
 private func drawMenuBarGlyph(in context: CGContext, size: CGFloat) {
-    let face = size <= 18 ? menuBarSmallFace : menuBarFace
-    let box = face.bounds
+    let glyph = size <= 18 ? menuBarSmallGlyph : menuBarGlyph
+    let box = glyph.silhouette.bounds
 
     context.setShouldAntialias(true)
     context.interpolationQuality = .high
     context.setLineCap(.round)
     context.setLineJoin(.round)
+    context.setFillColor(rgb(Palette.ink))
+    context.setStrokeColor(rgb(Palette.ink))
+
+    // Top-left down, like the 1024 layout, so the pixel positions read the same way.
+    context.translateBy(x: 0, y: size)
+    context.scaleBy(x: 1, y: -1)
 
     // Fitted, not inset. The frog is half again as wide as it is tall, so drawing it to the
     // icon's proportions would leave a third of an 18-point square empty and the mark would read
     // smaller than every SF Symbol beside it.
+    context.saveGState()
     let scale = min(size / box.width, size / box.height)
-    context.translateBy(x: 0, y: size)
-    context.scaleBy(x: 1, y: -1)
     context.translateBy(
         x: (size - box.width * scale) / 2,
         y: (size - box.height * scale) / 2
@@ -481,36 +507,39 @@ private func drawMenuBarGlyph(in context: CGContext, size: CGFloat) {
     context.scaleBy(x: scale, y: scale)
     context.translateBy(x: -box.minX, y: -box.minY)
 
-    context.setStrokeColor(rgb(Palette.ink))
-    context.setFillColor(rgb(Palette.ink))
-
-    let head = CGMutablePath()
-    head.move(to: face.headStart)
-    for c in face.head { head.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
-    head.closeSubpath()
-    context.addPath(head)
-    context.setLineWidth(face.headLine)
-    context.strokePath()
-
-    // A ring where there is room for a hole, a dot where there is not.
-    for (centre, pupil) in zip(face.eyeCentres, face.pupilCentres) {
-        if face.eyeLine > 0 {
-            let r = face.eyeRadius
-            context.addEllipse(in: CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
-            context.setLineWidth(face.eyeLine)
-            context.strokePath()
-        }
-        let r = face.pupilRadius
-        context.addEllipse(in: CGRect(x: pupil.x - r, y: pupil.y - r, width: r * 2, height: r * 2))
+    // Head and discs as separate fills rather than one path: the union does not then depend on
+    // the curves running the same way round as the ellipses, which the winding rule would.
+    context.addPath(glyph.silhouette.headPath)
+    context.fillPath()
+    for rect in glyph.silhouette.eyeRects {
+        context.addEllipse(in: rect)
         context.fillPath()
     }
+    context.restoreGState()
 
+    // Back in pixels for the features.
+    context.setBlendMode(.clear)
+    for centre in glyph.eyeCentres {
+        let r = glyph.eyeRadius
+        let rect = CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2)
+        context.addPath(CGPath(roundedRect: rect, cornerWidth: glyph.eyeCorner, cornerHeight: glyph.eyeCorner, transform: nil))
+        context.fillPath()
+    }
     let mouth = CGMutablePath()
-    mouth.move(to: face.mouthStart)
-    for c in face.mouthCurves { mouth.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
+    mouth.move(to: glyph.mouth.start)
+    for c in glyph.mouth.curves { mouth.addCurve(to: c.to, control1: c.c1, control2: c.c2) }
     context.addPath(mouth)
-    context.setLineWidth(face.mouthLine)
+    context.setLineWidth(glyph.mouthLine)
     context.strokePath()
+    context.setBlendMode(.normal)
+
+    if glyph.pupilRadius > 0 {
+        for centre in glyph.eyeCentres {
+            let r = glyph.pupilRadius
+            context.addEllipse(in: CGRect(x: centre.x - r, y: centre.y - r, width: r * 2, height: r * 2))
+            context.fillPath()
+        }
+    }
 }
 
 private func render(pixels: Int) -> CGImage {
