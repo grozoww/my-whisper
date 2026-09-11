@@ -336,11 +336,15 @@ reads well at 512 turns to mush when squeezed into 16 pixels. `--icns` also writ
 `dist/OurWhisper.icns` for anything outside the app bundle.
 
 The same script writes `MenuBarIcon.imageset`, the frog the menu bar shows when the app is idle:
-the same face, outline only, at 18 and 36 pixels. It is one drawing rather than a light one and a
-dark one because it ships as a **template** — macOS keeps only its alpha channel and paints the
-shape itself, dark on a light menu bar and light on a dark one, inverted again while the menu is
-open. Two fixed PNGs would get that wrong every time the menu bar's appearance and the system's
-disagree, which they do whenever the desktop picture is dark under Light Mode.
+the same face as a solid shape with the eyes and mouth cut out of it, at 18 and 36 pixels — the
+way every other glyph in a menu bar is drawn, and the reverse of the app icon's ink-on-skin. It
+is one drawing rather than a light one and a dark one because it ships as a **template** — macOS
+keeps only its alpha channel and paints the shape itself, dark on a light menu bar and light on a
+dark one, inverted again while the menu is open. Two fixed PNGs would get that wrong every time
+the menu bar's appearance and the system's disagree, which they do whenever the desktop picture
+is dark under Light Mode. The head is fitted from the shared geometry; the eyes and mouth are
+placed in pixels, per size, because at 18 pixels a two-pixel hole that straddles a pixel boundary
+is a grey blot rather than an eye.
 
 Release builds are **arm64 only**, set on the `xcodebuild` command line rather than only in the
 project — Swift package targets live in a generated project of their own and do not inherit
