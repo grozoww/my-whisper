@@ -120,7 +120,7 @@ enum BundleSignature {
         }
     }
 
-    enum Failure: LocalizedError {
+    enum Failure: LocalizedError, Equatable {
         case unreadable
         case wrongSigner
         case damaged(OSStatus)

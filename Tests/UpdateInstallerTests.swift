@@ -282,24 +282,77 @@ struct UpdateInstallerTests {
 
     // MARK: - The signature check
 
-    @Test("A bundle satisfies the requirement read off the app running the tests")
-    @MainActor
-    func verifiesTheRunningBundle() throws {
-        // The test host *is* an OurWhisper.app, so this is the real call on a real bundle: read the
-        // designated requirement, then check a bundle against it. It is the only thing standing
-        // between a downloaded file and the app.
-        let requirement = try BundleSignature.runningRequirement()
-        #expect(!requirement.isEmpty)
-        try BundleSignature.verify(Bundle.main.bundleURL, satisfies: requirement)
+    /// A real, ad-hoc-signed bundle, so the check runs against a signature rather than a hope.
+    ///
+    /// Not the test host: CI builds it with `CODE_SIGNING_ALLOWED=NO`, so its resources are never
+    /// sealed and verifying it fails with `errSecCSResourcesNotSealed` on every runner while
+    /// passing on every developer's Mac. A bundle the test signs itself behaves the same
+    /// everywhere, and can be tampered with on purpose.
+    private func signedProbe(in temp: TemporaryDirectory, identifier: String = "com.grozoww.probe") throws -> URL {
+        let app = temp.url.appendingPathComponent("Probe.app", isDirectory: true)
+        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("MacOS"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: contents.appendingPathComponent("Resources"), withIntermediateDirectories: true)
+        // Any Mach-O will do as the executable; codesign needs one to sign a bundle at all.
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: contents.appendingPathComponent("MacOS/Probe"))
+        try Data("sealed".utf8).write(to: contents.appendingPathComponent("Resources/sealed.txt"))
+        let info: [String: Any] = [
+            "CFBundleIdentifier": identifier,
+            "CFBundleExecutable": "Probe",
+            "CFBundlePackageType": "APPL",
+            "CFBundleName": "Probe",
+        ]
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+            .write(to: contents.appendingPathComponent("Info.plist"))
+
+        let sign = Process()
+        sign.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        sign.arguments = ["--force", "--sign", "-", app.path]
+        try sign.run()
+        sign.waitUntilExit()
+        try #require(sign.terminationStatus == 0)
+        return app
     }
 
-    @Test("A bundle that does not satisfy the requirement is rejected as the wrong signer")
-    @MainActor
-    func rejectsAnotherSigner() {
-        // The failure has to be distinguishable from "damaged", because the sentence the user is
-        // shown differs: one means someone else built it, the other means the bytes are broken.
-        #expect(throws: BundleSignature.Failure.self) {
-            try BundleSignature.verify(Bundle.main.bundleURL, satisfies: #"identifier "com.example.not-ourwhisper""#)
+    @Test("This app's own requirement can be read")
+    func readsTheRunningRequirement() throws {
+        // The first thing `perform` does. An unsigned test host still has a linker signature, so
+        // this works on CI as well as on a signed build; what it says differs, what matters is
+        // that it answers.
+        #expect(try !BundleSignature.runningRequirement().isEmpty)
+    }
+
+    @Test("A signed bundle satisfies a requirement it meets")
+    func verifiesASignedBundle() throws {
+        let temp = TemporaryDirectory()
+        let probe = try signedProbe(in: temp)
+        try BundleSignature.verify(probe, satisfies: #"identifier "com.grozoww.probe""#)
+    }
+
+    @Test("A bundle that does not meet the requirement is the wrong signer, not damaged")
+    func rejectsAnotherSigner() throws {
+        // The two have to be distinguishable, because the sentence the user is shown differs: one
+        // means someone else built it, the other means the bytes are broken.
+        let temp = TemporaryDirectory()
+        let probe = try signedProbe(in: temp)
+        #expect(throws: BundleSignature.Failure.wrongSigner) {
+            try BundleSignature.verify(probe, satisfies: #"identifier "com.example.someone-else""#)
+        }
+    }
+
+    @Test("A sealed resource changed after signing makes the bundle damaged")
+    func rejectsATamperedBundle() throws {
+        // This is the case a string comparison of designated requirements cannot catch: the
+        // tampered bundle still reports the same requirement as the genuine one.
+        let temp = TemporaryDirectory()
+        let probe = try signedProbe(in: temp)
+        try Data("sealed?".utf8).write(to: probe.appendingPathComponent("Contents/Resources/sealed.txt"))
+
+        do {
+            try BundleSignature.verify(probe, satisfies: #"identifier "com.grozoww.probe""#)
+            Issue.record("a bundle with a modified sealed resource verified")
+        } catch BundleSignature.Failure.damaged {
+            // The right refusal.
         }
     }
 
